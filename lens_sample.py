@@ -36,10 +36,10 @@ class LensSample:
                 ordering and the ordering assumed here. (see LENS_PARAMS above
                 for assumed ordering for each lens_type.)
         """
-
         if lens_type not in ['PEMD']:
             print('Supported lens_type values: \'PEMD\'')
             return ValueError
+        self.lens_type = lens_type
         self.lens_params = LENS_PARAMS[lens_type]
         if lens_type == 'PEMD':
             self.lenstronomy_lens_model = LensModel(['PEMD', 'SHEAR'])
@@ -59,9 +59,9 @@ class LensSample:
             idx = i
             if param_indices is not None:
                 idx = param_indices[i]
-            self.lens_df[param+'_truth'] = y_truth[:,param_indices[idx]]
-            self.lens_df[param+'_pred'] = y_pred[:,param_indices[idx]]
-            self.lens_df[param+'_stddev'] = std_pred[:,param_indices[idx]]
+            self.lens_df[param+'_truth'] = y_truth[:,idx]
+            self.lens_df[param+'_pred'] = y_pred[:,idx]
+            self.lens_df[param+'_stddev'] = std_pred[:,idx]
 
 
     def construct_lenstronomy_kwargs(self,row_idx,model_type='truth'):
@@ -95,24 +95,34 @@ class LensSample:
             
         return kwargs_lens
     
-    def compute_image_positions(self,model_type='truth'):
-        """
+    def compute_image_positions(self):
+        """Populates image positions in lens_df based on ground truth lens model
         Args:
-            type (string): 'truth' or 'pred'.
-
+           
         Returns:
+            modifies lens_df in place (changes x_im0,...y_im3)
 
         """
-
+        model_type = 'truth'
         # TODO: should we instantiate this only once?
-        solver = LensEquationSolver(self.lens_model)
-        for r in (0,len(self.lens_df)):
+        solver = LensEquationSolver(self.lenstronomy_lens_model)
+        for r in range(0,len(self.lens_df)):
             theta_x, theta_y = solver.image_position_from_source(
-                self.lens_df.iloc[r]['src_center_x'],
-                self.lens_df.iloc[r]['src_center_y'],
-                self.construct_lenstronomy_kwargs(r,model_type='truth')
+                self.lens_df.iloc[r]['src_center_x_'+model_type],
+                self.lens_df.iloc[r]['src_center_y_'+model_type],
+                self.construct_lenstronomy_kwargs(r,model_type=model_type)
             )
+            for i in range(0,len(theta_x)):
+                self.lens_df.at[r, 'x_im'+str(i)] = theta_x[i]
+                self.lens_df.at[r, 'y_im'+str(i)] = theta_y[i]
 
 
 
-    #def compute_fermat_differences(self):
+    def compute_fermat_differences(self):
+        """
+        
+        Returns:
+            modifies lens_df in place (adds fpd_01,fpd02,fpd03)
+        """
+
+        return None
