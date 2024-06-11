@@ -118,11 +118,31 @@ class LensSample:
 
 
 
-    def compute_fermat_differences(self):
+    def compute_fermat_differences(self,model_type='truth'):
+        """Computes fermat potential differences between image positions
+        Args:
+            model_type (string): 'truth' or 'pred'
+        Returns:
+            modifies lens_df in place to add fpd_01 (& fpd02,fpd03 for quads)
         """
         
-        Returns:
-            modifies lens_df in place (adds fpd_01,fpd02,fpd03)
-        """
+        for r in range(0,len(self.lens_df)):
+            zeroth_fp = self.lenstronomy_lens_model.fermat_potential(
+                self.lens_df.iloc[r]['x_im0'],self.lens_df.iloc[r]['y_im0'],
+                self.construct_lenstronomy_kwargs(r,model_type),
+                x_source=self.lens_df.iloc[r]['src_center_x_'+model_type],
+                y_source=self.lens_df.iloc[r]['src_center_y_'+model_type]
+            )
+            for j in range(1,4):
+                if np.isnan(self.lens_df.iloc[r]['x_im'+str(j)]):
+                    break
+                jth_fp = self.lenstronomy_lens_model.fermat_potential(
+                    self.lens_df.iloc[r]['x_im'+str(j)],
+                    self.lens_df.iloc[r]['y_im'+str(j)],
+                    self.construct_lenstronomy_kwargs(r,model_type),
+                    x_source=self.lens_df.iloc[r]['src_center_x_'+model_type],
+                    y_source=self.lens_df.iloc[r]['src_center_y_'+model_type]
+                )
 
-        return None
+                column_name = 'fpd0'+str(j)
+                self.lens_df.at[r, column_name] = zeroth_fp - jth_fp
