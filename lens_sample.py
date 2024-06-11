@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
+from scipy.stats import norm, truncnorm
 
 # lenstronomy stuff
 from astropy.cosmology import FlatLambdaCDM
@@ -95,6 +96,46 @@ class LensSample:
             
         return kwargs_lens
     
+    def sample_lenstronomy_kwargs(self,row_idx):
+        """uses _pred and _stddev to sample an instance of lenstronomy kwargs
+        from the diagonal Gaussian posterior
+
+        Returns:
+            kwargs_lens
+        """
+
+        lens_row = self.lens_df.iloc[row_idx]
+        model_type = 'pred'
+        if self.lens_type == 'PEMD':
+            # list of dicts, one for 'PEMD', one for 'SHEAR'
+            # TODO: if precision of these is too high, sampling will take forever!!
+            kwargs_lens = [
+                {
+                    'theta_E':norm.rvs(loc=lens_row['theta_E_'+model_type],
+                                       scale=lens_row['theta_E_stddev']),
+                    'gamma':norm.rvs(loc=lens_row['gamma_'+model_type],
+                                       scale=lens_row['gamma_stddev']),
+                    'e1':norm.rvs(loc=lens_row['e1_'+model_type],
+                                       scale=lens_row['e1_stddev']),
+                    'e2':norm.rvs(loc=lens_row['e2_'+model_type],
+                                       scale=lens_row['e2_stddev']),
+                    'center_x':norm.rvs(loc=lens_row['center_x_'+model_type],
+                                       scale=lens_row['center_x_stddev']),
+                    'center_y':norm.rvs(loc=lens_row['center_y_'+model_type],
+                                       scale=lens_row['center_y_stddev'])
+                },
+                {
+                    'gamma1':norm.rvs(loc=lens_row['gamma1_'+model_type],
+                                       scale=lens_row['gamma1_stddev']),
+                    'gamma2':norm.rvs(loc=lens_row['gamma2_'+model_type],
+                                       scale=lens_row['gamma2_stddev']),
+                    'ra_0':0.,
+                    'dec_0':0.
+                }]
+            
+        return kwargs_lens
+
+
     def compute_image_positions(self):
         """Populates image positions in lens_df based on ground truth lens model
         Args:
@@ -146,3 +187,29 @@ class LensSample:
 
                 column_name = 'fpd0'+str(j)
                 self.lens_df.at[r, column_name] = zeroth_fp - jth_fp
+
+    # TODO: finish writing!!!
+    def pred_fpd_samples(self,lens_idx,n_samps=int(1e3)):
+        """samples lens model params & computes fpd for each sample at the 
+            ground truth image positions
+        Returns:
+            a list of fpd samples
+        """
+
+        lens_row = self.lens_df.iloc[lens_idx]
+
+        # check if 2 images or 4 images
+        if np.isnan(lens_row['x_im2']):
+            num_fpd = 1
+        else:
+            num_fpd = 3
+
+        # TODO: consistent naming!
+        fpd_samps = np.empty((num_fpd,n_samps))
+
+        for s in range(0,n_samps):
+            samp_kwargs = self.sample_lenstronomy_kwargs(self,lens_idx)
+
+
+
+
