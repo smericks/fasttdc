@@ -379,15 +379,15 @@ class LensSample:
         #self.lik_a_cov = np.exp(self.loglik_a_cov)
 
 
-    def H0_from_lens(self,lens_idx):
-        """Infers H0 from time delays and lens model params ASSUMING
-            FlatLambdaCDM w/ Om0=0.3
+    def H0_log_likelihood_lens(self,h0_samps,lens_idx):
+        """Computes log_likelihood for each h0 samp for one lens
+
         Args:
-            lens_idx (int)
+            h0_samps ([float]): list of proposed h0 values
+            lens_idx (int): row in lens_df
 
         Returns:
-            samps, weights for H0
-        
+            list of log_likelihoods (one for each h0 samp)
         """
 
         # get the redshifts
@@ -400,16 +400,56 @@ class LensSample:
         # hierArc likelihood object
         my_likelihood = DdtHistLikelihood(z_lens,z_src,ddt_samps,ddt_weights)
 
-        # propose a bunch of H0s
-        H_0_samps = uniform.rvs(loc=40,scale=60,size=5000)
-
-        likelihoods = np.asarray([])
-        for h0 in H_0_samps:
+        log_likelihoods = np.asarray([])
+        for h0 in h0_samps:
 
             # compute ddt 
             ddt_proposed = tdc_utils.ddt_from_redshifts(FlatLambdaCDM(H0=h0,Om0=0.3),z_lens,z_src)
             # evaluate likelihood
-            log_likelihood = my_likelihood.log_likelihood(ddt_proposed)
-            likelihoods = np.append(likelihoods,np.exp(log_likelihood))
+            ll = my_likelihood.log_likelihood(ddt_proposed)
+            log_likelihoods = np.append(log_likelihoods,ll)
 
-        return H_0_samps, likelihoods
+        return log_likelihoods
+
+
+
+    def H0_individual_lens(self,lens_idx):
+        """Infers H0 from time delays and lens model params ASSUMING
+            FlatLambdaCDM w/ Om0=0.3
+        Args:
+            lens_idx (int)
+
+        Returns:
+            samps, weights for H0
+        
+        """
+
+        # propose a bunch of H0s
+        H_0_samps = uniform.rvs(loc=0,scale=150,size=5000)
+
+        log_likelihood_list = self.H0_log_likelihood_lens(H_0_samps,lens_idx)
+
+        return H_0_samps, np.exp(log_likelihood_list)
+    
+
+    def H0_joint_inference(self):
+        """
+        Uses all the lenses in the sample to infer H0
+        """
+
+        # propose a bunch of H0s
+        H_0_samps = uniform.rvs(loc=0,scale=150,size=5000)
+
+        all_lenses_log_likelihoods = np.asarray([])
+        # we already have a function that can compute the likelihood for each h0 samp for each lens!
+        for r in range(0,len(self.lens_df)):
+
+            lens_log_likelihoods = self.H0_log_likelihood_lens(H_0_samps,r)
+            all_lenses_log_likelihoods = np.append(all_lenses_log_likelihoods,lens_log_likelihoods)
+            
+        
+        # TODO: need to combine the likelihoods in all_lenses_log_likelihoods
+
+        # TODO: change!
+        return H_0_samps, all_lenses_log_likelihoods
+
