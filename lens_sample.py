@@ -434,22 +434,26 @@ class LensSample:
 
     def H0_joint_inference(self):
         """
-        Uses all the lenses in the sample to infer H0
+        Uses all the lenses in the sample to infer H0 by simply multiplying 
+            likelihoods
+
+        Returns:
+            h0 samples, weights for each sample (i.e. likelihoods)
         """
 
         # propose a bunch of H0s
-        H_0_samps = uniform.rvs(loc=0,scale=150,size=5000)
+        # TODO: change to more samples (just debugging)
+        num_samps = 5000
+        H_0_samps = uniform.rvs(loc=0,scale=150,size=num_samps)
 
-        all_lenses_log_likelihoods = np.asarray([])
+        all_lenses_log_likelihoods = np.empty((len(self.lens_df),num_samps))
         # we already have a function that can compute the likelihood for each h0 samp for each lens!
         for r in range(0,len(self.lens_df)):
 
-            lens_log_likelihoods = self.H0_log_likelihood_lens(H_0_samps,r)
-            all_lenses_log_likelihoods = np.append(all_lenses_log_likelihoods,lens_log_likelihoods)
+            all_lenses_log_likelihoods[r] = self.H0_log_likelihood_lens(H_0_samps,r)
             
-        
-        # TODO: need to combine the likelihoods in all_lenses_log_likelihoods
+        # sum log likelihoods from each lens
+        joint_log_likelihood = np.sum(all_lenses_log_likelihoods,axis=0)
 
-        # TODO: change!
-        return H_0_samps, all_lenses_log_likelihoods
+        return H_0_samps, np.exp(joint_log_likelihood)
 
