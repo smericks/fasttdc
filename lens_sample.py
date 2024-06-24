@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.stats import norm, truncnorm, uniform
+import emcee
 
 # lenstronomy stuff
 from astropy.cosmology import FlatLambdaCDM
@@ -19,6 +20,7 @@ LENS_PARAMS = {
             'src_center_x','src_center_y']
 }
 
+
 class LensSample:
     """
         self.lens_params: array of strings storing lens model parameter names
@@ -26,18 +28,10 @@ class LensSample:
             a lensing system
     """
 
-    def __init__(self,y_truth,y_pred,std_pred,lens_type='PEMD',
-        param_indices=None,truth_cosmology=None):
+    def __init__(self,lens_type='PEMD',truth_cosmology=None):
         """Assumes there is a Gaussian prediction for each lens param
 
-            y_truth ([n_lenses,n_params]): ground truth lens params
-            y_pred ([n_lenses,n_params]): predicted mean, lens params
-            std_pred ([n_lenses,n_params]): predicted std. dev., lens params
             lens_type (string): 
-            param_indices ([n_params]): If ordering of params provided does not 
-                match assumed ordering, use this to translate between your 
-                ordering and the ordering assumed here. (see LENS_PARAMS above
-                for assumed ordering for each lens_type.)
             truth_cosmology (astropy cosmology object): if None, defaults to
                 FlatLambdaCDM(H0=70.,Om0=0.3).
         """
@@ -57,16 +51,8 @@ class LensSample:
         # second, image positions
         im_positions = ['x_im0','x_im1','x_im2','x_im3','y_im0','y_im1','y_im2','y_im3']
         columns.extend(im_positions)
-
-        # now we fill the dataframe!
+        # Now, let's create an empty dataframe to be filled
         self.lens_df = pd.DataFrame(columns=columns)
-        for i,param in enumerate(self.lens_params):
-            idx = i
-            if param_indices is not None:
-                idx = param_indices[i]
-            self.lens_df[param+'_truth'] = y_truth[:,idx]
-            self.lens_df[param+'_pred'] = y_pred[:,idx]
-            self.lens_df[param+'_stddev'] = std_pred[:,idx]
 
         # instantiate the cosmology object
         if truth_cosmology is None:
@@ -167,6 +153,27 @@ class LensSample:
         self.lens_df['z_lens'] = z_lens
         self.lens_df['z_src'] = z_src
 
+    def single_row_image_positions(self,r,model_type='truth',solver=None):
+        """
+        Args:
+            r (int): index of lens to compute for
+            model_type (string): 'truth' or 'pred'
+            solver (lenstronomy.LensEquationSolver): if lens model stays the 
+                same, we can pass this instead of re-instantiating many times
+        Returns:
+            modifies lens_df in place at row r (changes x_im0,...y_im3)
+        """
+        if solver is None:
+            solver = LensEquationSolver(self.lenstronomy_lens_model)
+        theta_x, theta_y = solver.image_position_from_source(
+                self.lens_df.iloc[r]['src_center_x_'+model_type],
+                self.lens_df.iloc[r]['src_center_y_'+model_type],
+                self.construct_lenstronomy_kwargs(r,model_type=model_type)
+            )
+        for i in range(0,len(theta_x)):
+            self.lens_df.at[r, 'x_im'+str(i)] = theta_x[i]
+            self.lens_df.at[r, 'y_im'+str(i)] = theta_y[i]
+
     def populate_image_positions(self):
         """Populates image positions in lens_df based on ground truth lens model
 
@@ -175,17 +182,10 @@ class LensSample:
 
         """
         model_type = 'truth'
-        # TODO: should we instantiate this only once?
         solver = LensEquationSolver(self.lenstronomy_lens_model)
         for r in range(0,len(self.lens_df)):
-            theta_x, theta_y = solver.image_position_from_source(
-                self.lens_df.iloc[r]['src_center_x_'+model_type],
-                self.lens_df.iloc[r]['src_center_y_'+model_type],
-                self.construct_lenstronomy_kwargs(r,model_type=model_type)
-            )
-            for i in range(0,len(theta_x)):
-                self.lens_df.at[r, 'x_im'+str(i)] = theta_x[i]
-                self.lens_df.at[r, 'y_im'+str(i)] = theta_y[i]
+            self.single_row_image_positions(r,model_type=model_type,
+                solver=solver)
 
     def fermat_differences(self,lens_idx,lens_kwargs,x_src,y_src):
         """Computes fermat potential differences at image positions
@@ -200,6 +200,13 @@ class LensSample:
             fpd_list ([float]): list of fermat potential differences 
                 fpd01(,fpd02,fpd03)
         """
+
+        # check if x_im0 exists, if not, compute im positions for this row
+        if np.isnan(self.lens_df.loc[lens_idx,'x_im0']):
+            self.single_row_image_positions(lens_idx,
+                model_type='truth',solver=None)
+            
+
         fpd_list = []
         zeroth_fp = self.lenstronomy_lens_model.fermat_potential(
                 self.lens_df.iloc[lens_idx]['x_im0'],
@@ -218,11 +225,10 @@ class LensSample:
                 x_source=x_src,
                 y_source=y_src
             )
-
             fpd_list.append(zeroth_fp - jth_fp)
 
         return fpd_list
-
+        
 
     def populate_fermat_differences(self):
         """Populates ground truth fermat potential differences at image positions
@@ -243,11 +249,17 @@ class LensSample:
                 column_name = 'fpd0'+str(j+1)
                 self.lens_df.at[r, column_name] = fpd_list[j]
 
-    def pred_fpd_samples(self,lens_idx,n_samps=int(1e3)):
+    def pred_fpd_samples(self,lens_idx,n_samps=int(1e3),gamma_lens=False):
         """samples lens model params & computes fpd for each sample at the 
             ground truth image positions
+        Args:
+            lens_idx (int)
+            n_samps (int): # of samples
+            gamma_lens (bool): Default=False. If True, returns 
+                fpd_samps and gamma_lens_samps
         Returns:
             a list of fpd samples size (num_fpd,n_samps)
+            (If gamma_lens = True, returns fpd_samps,gamma_lens_samps)
         """
 
         lens_row = self.lens_df.iloc[lens_idx]
@@ -263,9 +275,12 @@ class LensSample:
 
         # TODO: consistent naming!
         fpd_samps = np.empty((num_fpd,n_samps))
-
+        if gamma_lens:
+            gamma_lens_samps = np.empty((n_samps))
         for s in range(0,n_samps):
             samp_kwargs = self.sample_lenstronomy_kwargs(lens_idx)
+            if gamma_lens:
+                gamma_lens_samps[s] = samp_kwargs[0]['gamma']
             # sample x_src,y_src
             x_src = norm.rvs(loc=lens_row['src_center_x_pred'],
                 scale=lens_row['src_center_x_stddev'])
@@ -275,6 +290,8 @@ class LensSample:
             fpd_samps[:,s] = self.fermat_differences(lens_idx,samp_kwargs,
                 x_src,y_src)
 
+        if gamma_lens:
+            return fpd_samps,gamma_lens_samps
         return fpd_samps
     
 
@@ -329,8 +346,6 @@ class LensSample:
 
                 measured_td = norm.rvs(loc=truth_td,scale=measurement_error)
                 self.lens_df.loc[r,'td0'+str(j+1)+'_measured'] = measured_td
-            
-
 
     def Ddt_posterior(self,lens_idx,td_uncertainty=2):
         """Infers Ddt posterior for a single lens using _pred, _stddev 
@@ -368,9 +383,7 @@ class LensSample:
             td_pred = tdc_utils.td_from_ddt_fpd(D,fpd_samples)
 
             # compute log likelihood
-            loglikelihood = (-0.5*np.sum(np.matmul(td_measured-td_pred.T,np.linalg.inv(td_cov))*((td_measured-td_pred.T)),axis=1) 
-                - 0.5*np.log(np.linalg.det(td_cov)) 
-                - ((np.shape(td_pred)[0])/2.)*np.log(2*np.pi))
+            loglikelihood = tdc_utils.td_log_likelihood(td_measured,td_cov,td_pred)
         
             Ddt_likelihoods = np.append(Ddt_likelihoods, np.mean(np.exp(loglikelihood.astype(np.float32))))
 
@@ -444,7 +457,7 @@ class LensSample:
         # propose a bunch of H0s
         # TODO: change to more samples (just debugging)
         num_samps = 5000
-        H_0_samps = uniform.rvs(loc=0,scale=150,size=num_samps)
+        H_0_samps = uniform.rvs(loc=0,scale=200,size=num_samps)
 
         all_lenses_log_likelihoods = np.empty((len(self.lens_df),num_samps))
         # we already have a function that can compute the likelihood for each h0 samp for each lens!
@@ -457,3 +470,241 @@ class LensSample:
 
         return H_0_samps, np.exp(joint_log_likelihood)
 
+
+    def H0_gamma_lens_joint_inference(self,nu_int,td_uncertainty=2.,
+            num_emcee_samps=6000):
+        """ Joint inference for mu(gamma_lens),sigma(gamma_lens), and H0
+            which requires many evaluations of the predicted time delay
+        
+        Args:
+            nu_int (scipy.stats object): stores probability distribution for
+                interim lens modeling prior
+            td_uncertainty ([float]): measurement error on time delay measurements
+                (default=2.)
+            num_emcee_samps (int): # samples during MCMC
+
+        Returns:    
+            emcee sampler.chain (n_walkers,n_samples)
+        """
+        
+        n_lenses = len(self.lens_df)
+        # TODO: hardcoded for quads!
+        all_lenses_fpd_samps = np.empty((n_lenses,3,int(1e3)))
+        all_lenses_gamma_samps = np.empty((n_lenses,int(1e3)))
+        all_lenses_gamma_log_nu_int = np.empty((n_lenses,int(1e3)))
+
+        # loop thru each lens
+        for r in range(0,n_lenses):
+            # samples of fermat potential diffs. & corresponding gamma_lens
+            fpd_samps,gamma_lens_samps = self.pred_fpd_samples(r,
+                n_samps=int(1e3),gamma_lens=True)
+            
+            gamma_samps_nu_int = nu_int.logpdf(gamma_lens_samps)
+
+            all_lenses_fpd_samps[r] = fpd_samps
+            all_lenses_gamma_samps[r] = gamma_lens_samps
+            all_lenses_gamma_log_nu_int[r] = gamma_samps_nu_int
+
+        # now that we've constructed our list of samples, use those to construct
+        # a log posterior function
+
+        def h0_gamma_log_prior(hyperparams):
+            """
+            Assumes ordering: h0, mu(gamma_lens), sigma(gamma_lens)
+            """
+
+            if hyperparams[0] < 0 or hyperparams[0] > 150:
+                return -np.inf
+            elif hyperparams[1] < 1.5 or hyperparams[1] > 2.5:
+                return -np.inf
+            elif hyperparams[2] < 0.001 or hyperparams[2] > 0.2:
+                return -np.inf
+            
+            return 0
+
+        def h0_gamma_log_likelihood(hyperparams):
+            """
+            Assumes ordering: h0, mu(gamma_lens), sigma(gamma_lens)
+            """
+            
+            log_likelihood = 0
+
+            for r in range(0,len(self.lens_df)):
+                # compute predicted td
+                z_lens = self.lens_df.loc[r,'z_lens']
+                z_src = self.lens_df.loc[r,'z_src']
+                # remember this returns a quantity not a number
+                ddt_proposed = tdc_utils.ddt_from_redshifts(
+                    FlatLambdaCDM(H0=hyperparams[0],Om0=0.3),z_lens,z_src).value
+                td_pred = tdc_utils.td_from_ddt_fpd(ddt_proposed,
+                    all_lenses_fpd_samps[r])
+
+                # get measured td w/ covariance
+                # construct td_cov based on # of fpd_samps
+                td_cov = np.eye(
+                    all_lenses_fpd_samps[r].shape[0])*(td_uncertainty**2)
+
+                td_measured = np.asarray(self.lens_df.loc[r,['td01_measured',
+                    'td02_measured','td03_measured']])
+
+                # TODO: needs to handle quads & doubles @ the same time!
+                td_log_likelihood = tdc_utils.td_log_likelihood(td_measured,
+                    td_cov,td_pred).astype(np.float32)
+
+                # reweighting factor
+                eval_at_nu = norm.logpdf(all_lenses_gamma_samps[r],
+                    loc=hyperparams[1],scale=hyperparams[2])
+                rw_factor = eval_at_nu - all_lenses_gamma_log_nu_int[r]
+
+                # sum across xi_k samples
+                individ_likelihood = np.mean(np.exp(td_log_likelihood+rw_factor))
+
+                log_likelihood += np.log(individ_likelihood)
+
+            return log_likelihood
+        
+        def h0_gamma_log_posterior(hyperparams):
+
+            # prior is either 0 or np.inf
+            prior = h0_gamma_log_prior(hyperparams)
+
+            # only evaluate likelihood if within prior range
+            if prior == 0:
+                return prior+h0_gamma_log_likelihood(hyperparams)
+            
+            return prior
+        
+
+        # ok great, MCMC time!
+
+        # 10 walkers, 3 dimensions
+        n_walkers = 10
+        sampler = emcee.EnsembleSampler(n_walkers,3,h0_gamma_log_posterior)
+        # create initial state
+        cur_state = np.empty((10,3))
+        # fill h0 initial state
+        cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers)
+        # fill mu(gamma_lens) initial state
+        cur_state[:,1] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
+        # fill sigma(gamma_lens) initial state
+        cur_state[:,2] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+
+        # run mcmc
+        _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps)
+
+        return sampler.chain
+
+# make this one inherited too so we don't have to rewrite stuff
+class ModeledLensSample(LensSample):
+
+    def __init__(self,y_truth,y_pred,std_pred,lens_type='PEMD',
+        param_indices=None,truth_cosmology=None):
+        """
+        Args:
+            y_truth ([n_lenses,n_params]): ground truth lens params
+            y_pred ([n_lenses,n_params]): predicted mean, lens params
+            std_pred ([n_lenses,n_params]): predicted std. dev., lens params
+            lens_type (string): 
+            param_indices ([n_params]): If ordering of params provided does not 
+                match assumed ordering, use this to translate between your 
+                ordering and the ordering assumed here. (see LENS_PARAMS above
+                for assumed ordering for each lens_type.)
+            truth_cosmology (astropy cosmology object): if None, defaults to
+                FlatLambdaCDM(H0=70.,Om0=0.3).
+        """
+
+        # super init
+        super().__init__(lens_type,truth_cosmology)
+
+        # now we fill the dataframe!
+        for i,param in enumerate(self.lens_params):
+            idx = i
+            if param_indices is not None:
+                idx = param_indices[i]
+            self.lens_df[param+'_truth'] = y_truth[:,idx]
+            self.lens_df[param+'_pred'] = y_pred[:,idx]
+            self.lens_df[param+'_stddev'] = std_pred[:,idx]
+
+# inherit from above class, just change how params are populated.
+class EmulatedLensSample(LensSample):
+
+    def __init__(self,param_dict,num_lenses,lens_type='PEMD',
+        truth_cosmology=None):
+        """
+        Args:
+            param_dict (dict): keys are parameter names, values are scipy.stats 
+                callable distributions
+            num_lenses (int): # lenses to populate 
+            lens_type (string): 
+            truth_cosmology (astropy cosmology object): if None, defaults to
+                FlatLambdaCDM(H0=70.,Om0=0.3).
+        """
+
+        # super init
+        super().__init__(lens_type,truth_cosmology)
+        # set a random seed for reproducible results
+        np.random.seed(seed=233423)
+        # now, fill in the lenses
+        # now we fill the dataframe!
+
+        # gonna have to do rejection sampling for length of time delay
+        num_successes = 0
+        while num_successes < num_lenses:
+            # construct row
+            for i,param in enumerate(self.lens_params):
+                self.lens_df.loc[num_successes,param+'_truth'] = param_dict[param].rvs()
+
+            # construct lens kwargs & pull x_src,y_src
+            lens_kwargs = self.construct_lenstronomy_kwargs(num_successes)
+            # sample x_src,y_src
+            x_src = self.lens_df.loc[num_successes,'src_center_x_truth']
+            y_src = self.lens_df.loc[num_successes,'src_center_y_truth']
+            # compute image positions
+            self.single_row_image_positions(num_successes,model_type='truth',
+                solver=None)
+            # check that actually a lens (i.e. check for single image systems)
+            if np.isnan(self.lens_df.loc[num_successes,'x_im1']):
+                continue
+            # need fpd, redshifts, Ddt
+            fpd_list = self.fermat_differences(num_successes,
+                lens_kwargs,x_src,y_src)
+            # pull redshifts
+            z_lens = truncnorm.rvs(-0.5/0.2,np.inf,loc=0.5,scale=0.2)
+            src_mean = 2.
+            src_stddev = 0.4
+            min_in_std = (src_mean - z_lens)/src_stddev
+            z_src = truncnorm.rvs(-min_in_std,np.inf,loc=src_mean,scale=src_stddev)
+            
+            self.lens_df.loc[num_successes,'z_lens'] = z_lens
+            self.lens_df.loc[num_successes,'z_src'] = z_src
+            Ddt = tdc_utils.ddt_from_redshifts(self.my_cosmology,
+                self.lens_df.loc[num_successes,'z_lens'],
+                self.lens_df.loc[num_successes,'z_src']).value
+            self.lens_df.loc[num_successes,'Ddt_Mpc_truth'] = Ddt
+            
+            td = tdc_utils.td_from_ddt_fpd(Ddt,np.asarray(fpd_list))
+
+            for j in range(0,len(td)):
+                self.lens_df.loc[num_successes,'td0'+str(j+1)] = td[j]
+
+            # if too short, overwrites the row in the next pass of the loop
+            if np.max(np.abs(td)) > 2.:
+                num_successes += 1
+
+    def populate_modeling_preds(self,modeling_error_dict):
+        """Populates a _pred and _stddev for each lens param
+
+        Args:
+            modeling_error_dict (dict): assumed amt. of modeling error for each
+                param in lens_params
+        """
+
+        for i,param in enumerate(self.lens_params):
+
+            stddev = modeling_error_dict[param]
+
+            num_lenses = len(self.lens_df)
+            std_devs = np.ones((num_lenses))*stddev
+            means = self.lens_df[param+'_truth'].to_numpy()
+            self.lens_df[param+'_pred'] = norm.rvs(loc=means,scale=std_devs)
+            self.lens_df[param+'_stddev'] = std_devs

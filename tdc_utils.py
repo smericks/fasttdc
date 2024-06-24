@@ -1,3 +1,5 @@
+import numpy as np
+
 
 C_kmpersec = 299792
 Mpc_in_km = 3.086e+19 #("Mpc in units of km")
@@ -25,22 +27,6 @@ def ddt_from_redshifts(my_cosmology,z_lens,z_src):
 
     return Ddt
 
-
-# this is probably wrong!! 
-#def ddt_from_td_fpd(delta_t,delta_phi):
-#    """
-#    Args:
-#        delta_t (float): time delay difference in days
-#        delta_phi (float): fermat potential difference
-
-#    Returns:
-#        ddt (float): time delay distance in Mpc
-#    """
-
-#    delta_t_sec = delta_t*24*60*60 #24hrs, 60mins, 60sec
-
-#    return C_kmpersec*delta_t_sec/delta_phi 
-
 def td_from_ddt_fpd(Ddt,delta_phi):
     """
     Args:
@@ -60,3 +46,18 @@ def td_from_ddt_fpd(Ddt,delta_phi):
 
     return delta_t_sec/(24*60*60) #24hrs, 60mins, 60sec
 
+
+def td_log_likelihood(td_measured,td_cov,td_pred):
+    """Helper function for time delay cosmography
+
+    Args:
+        td_measured ([float]): (n_time_delays)
+        td_cov ([float]): (n_time_delays,n_time_delays)
+        td_pred ([float]): (n_time_delays,n_samps)
+    Returns:
+        log_likelihoods (n_samps)
+
+    """
+    return (-0.5*np.sum(np.matmul(td_measured-td_pred.T,np.linalg.inv(td_cov))*((td_measured-td_pred.T)),axis=1) 
+            - 0.5*np.log(np.linalg.det(td_cov)) 
+            - ((np.shape(td_pred)[0])/2.)*np.log(2*np.pi))
