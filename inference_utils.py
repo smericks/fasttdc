@@ -41,7 +41,7 @@ def weighted_quantile(values, quantiles, sample_weight=None,
     # weighted_quantiles & values has to be 1d for this function to work
     return np.interp(quantiles, weighted_quantiles, values)
 
-def median_sigma_from_samples(samples,weights):
+def median_sigma_from_samples(samples,weights=None):
     """Computes weighted median & 1-sigma bound from a set of samples w/ weights
     Args:
         samples:
@@ -52,7 +52,10 @@ def median_sigma_from_samples(samples,weights):
     """
 
 
-    median,low,high = weighted_quantile(samples,[0.5,0.1586,0.8413],weights)
+    if weights is not None:
+        median,low,high = weighted_quantile(samples,[0.5,0.1586,0.8413],weights)
+    else:
+        median,low,high = np.quantile(samples,[0.5,0.1586,0.8413])
     sigma = ((high-median)+(median-low))/2
 
     return median,sigma

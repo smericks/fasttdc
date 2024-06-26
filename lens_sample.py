@@ -358,14 +358,21 @@ class LensSample:
             samples & weights
         """
 
+        # TODO: Fix this function to handle multiple images!
+
         # compute fpd samples
         n_samps = int(1e3)
         fpd_samples = self.pred_fpd_samples(lens_idx,n_samps)
 
-        # construct td_cov based on # of fpd_samps
-        td_cov = np.eye(fpd_samples.shape[0])*(td_uncertainty**2)
+        # construct td_measured & td_cov
+        td_measured = np.asarray(self.lens_df.loc[lens_idx,['td01_measured',
+            'td02_measured','td03_measured']]).astype(np.float32)
+        to_idx = 3 - np.sum(np.isnan(td_measured)) # number of tds not nan
+        td_measured = td_measured[0:to_idx]
 
-        td_measured = np.asarray(self.lens_df.loc[lens_idx,['td01_measured','td02_measured','td03_measured']])
+        # construct td_cov based on # of images
+        td_cov = np.eye(
+            len(td_measured))*(td_uncertainty**2)
 
         # sample Ddt from prior
         # uniform prior, 0 -> 15,000 Mpc
@@ -501,7 +508,15 @@ class LensSample:
             
             gamma_samps_nu_int = nu_int.logpdf(gamma_lens_samps)
 
-            all_lenses_fpd_samps[r] = fpd_samps
+            # TODO: fix here to account for not quads!
+            if len(fpd_samps) == 3:
+                all_lenses_fpd_samps[r] = fpd_samps
+            elif len(fpd_samps) == 2:
+                all_lenses_fpd_samps[r,0:2] = fpd_samps
+                all_lenses_fpd_samps[r,2] = np.nan*np.ones(len(gamma_lens_samps))
+            elif len(fpd_samps) ==1:
+                all_lenses_fpd_samps[r,0] = fpd_samps
+                all_lenses_fpd_samps[r,1:] = np.nan*np.ones((2,len(gamma_lens_samps)))
             all_lenses_gamma_samps[r] = gamma_lens_samps
             all_lenses_gamma_log_nu_int[r] = gamma_samps_nu_int
 
@@ -536,20 +551,38 @@ class LensSample:
                 # remember this returns a quantity not a number
                 ddt_proposed = tdc_utils.ddt_from_redshifts(
                     FlatLambdaCDM(H0=hyperparams[0],Om0=0.3),z_lens,z_src).value
+                
+                # fpd samps has shape (num_images,num_samples)
+                fpd_samps = all_lenses_fpd_samps[r]
+                # doubles
+                if np.isnan(fpd_samps[1,0]):
+                    fpd_samps = fpd_samps[0,:]
+                    num_images = 2
+                # triples
+                elif np.isnan(fpd_samps[1,0]):
+                    fpd_samps = fpd_samps[0:2,:]
+                    num_images = 3
+                else:
+                    num_images = 4
+
                 td_pred = tdc_utils.td_from_ddt_fpd(ddt_proposed,
-                    all_lenses_fpd_samps[r])
+                    fpd_samps)
 
                 # get measured td w/ covariance
-                # construct td_cov based on # of fpd_samps
-                td_cov = np.eye(
-                    all_lenses_fpd_samps[r].shape[0])*(td_uncertainty**2)
-
+                # need to account for # of images
                 td_measured = np.asarray(self.lens_df.loc[r,['td01_measured',
                     'td02_measured','td03_measured']])
+                to_idx = num_images-1
+                td_measured = td_measured[0:to_idx]
+
+                # construct td_cov based on # of images
+                # TODO: fix this for single time delay case!
+                td_cov = np.eye(
+                    len(td_measured))*(td_uncertainty**2)
 
                 # TODO: needs to handle quads & doubles @ the same time!
                 td_log_likelihood = tdc_utils.td_log_likelihood(td_measured,
-                    td_cov,td_pred).astype(np.float32)
+                    td_cov,td_pred).astype(np.float64)
 
                 # reweighting factor
                 eval_at_nu = norm.logpdf(all_lenses_gamma_samps[r],
@@ -559,13 +592,17 @@ class LensSample:
                 # sum across xi_k samples
                 individ_likelihood = np.mean(np.exp(td_log_likelihood+rw_factor))
 
+                # TODO need to deal with this overflow issue another way...
+                if individ_likelihood == 0:
+                    return -np.inf
+
                 log_likelihood += np.log(individ_likelihood)
 
             return log_likelihood
         
         def h0_gamma_log_posterior(hyperparams):
 
-            # prior is either 0 or np.inf
+            # prior is either 0 or -np.inf
             prior = h0_gamma_log_prior(hyperparams)
 
             # only evaluate likelihood if within prior range
@@ -584,10 +621,13 @@ class LensSample:
         cur_state = np.empty((10,3))
         # fill h0 initial state
         cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers)
+        #cur_state[:,0] = norm.rvs(loc=70,scale=5,size=n_walkers)
         # fill mu(gamma_lens) initial state
         cur_state[:,1] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
+        #cur_state[:,1] = norm.rvs(loc=2.05,scale=0.02,size=n_walkers)
         # fill sigma(gamma_lens) initial state
         cur_state[:,2] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+        #cur_state[:,2] = norm.rvs(loc=0.1,scale=0.02,size=n_walkers)
 
         # run mcmc
         _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps)
@@ -688,7 +728,8 @@ class EmulatedLensSample(LensSample):
                 self.lens_df.loc[num_successes,'td0'+str(j+1)] = td[j]
 
             # if too short, overwrites the row in the next pass of the loop
-            if np.max(np.abs(td)) > 2.:
+            # for now, don't use any of the 3s
+            if np.max(np.abs(td)) > 2. and len(td)!=2:
                 num_successes += 1
 
     def populate_modeling_preds(self,modeling_error_dict):

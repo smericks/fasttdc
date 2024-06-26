@@ -58,6 +58,14 @@ def td_log_likelihood(td_measured,td_cov,td_pred):
         log_likelihoods (n_samps)
 
     """
+    # TODO: handle edge case of 1d time delay
+    # just get rid of the sum?
+    if len(td_measured) == 1:
+
+        return (-0.5*((td_measured[0]-td_pred)**2)/(td_cov[0][0])
+            - 0.5*np.log(np.linalg.det(td_cov)) 
+            - (1/2.)*np.log(2*np.pi))
+    
     return (-0.5*np.sum(np.matmul(td_measured-td_pred.T,np.linalg.inv(td_cov))*((td_measured-td_pred.T)),axis=1) 
             - 0.5*np.log(np.linalg.det(td_cov)) 
             - ((np.shape(td_pred)[0])/2.)*np.log(2*np.pi))
