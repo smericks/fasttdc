@@ -3,9 +3,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.stats import norm, truncnorm, uniform
 import emcee
+import time
 
 # lenstronomy stuff
 from astropy.cosmology import FlatLambdaCDM
+from colossus.cosmology.cosmology import fromAstropy
 from lenstronomy.LensModel.lens_model import LensModel
 from lenstronomy.LensModel.Solver.lens_equation_solver import LensEquationSolver
 
@@ -346,13 +348,13 @@ class LensSample:
 
                 measured_td = norm.rvs(loc=truth_td,scale=measurement_error)
                 self.lens_df.loc[r,'td0'+str(j+1)+'_measured'] = measured_td
+                self.lens_df.loc[r,'td0'+str(j+1)+'_stddev'] = measurement_error
 
-    def Ddt_posterior(self,lens_idx,td_uncertainty=2):
+    def Ddt_posterior(self,lens_idx):
         """Infers Ddt posterior for a single lens using _pred, _stddev 
             lens model params
         Args:
             lens_idx (int): row of the lens_df
-            td_uncertainty (float): in days, Gaussian
 
         Returns:
             samples & weights
@@ -371,8 +373,10 @@ class LensSample:
         td_measured = td_measured[0:to_idx]
 
         # construct td_cov based on # of images
-        td_cov = np.eye(
-            len(td_measured))*(td_uncertainty**2)
+        td_uncertainty = self.lens_df.loc[lens_idx,['td01_stddev',
+            'td02_stddev','td03_stddev']].astype(np.float32)
+        td_uncertainty = td_uncertainty[0:to_idx]
+        td_cov = np.diag(td_uncertainty**2)
 
         # sample Ddt from prior
         # uniform prior, 0 -> 15,000 Mpc
@@ -415,7 +419,7 @@ class LensSample:
         z_src = self.lens_df.loc[lens_idx,'z_src']
 
         # compute Ddt samples & weights
-        ddt_samps, ddt_weights = self.Ddt_posterior(lens_idx,td_uncertainty=2)
+        ddt_samps, ddt_weights = self.Ddt_posterior(lens_idx)
 
         # hierArc likelihood object
         my_likelihood = DdtHistLikelihood(z_lens,z_src,ddt_samps,ddt_weights)
@@ -478,7 +482,7 @@ class LensSample:
         return H_0_samps, np.exp(joint_log_likelihood)
 
 
-    def H0_gamma_lens_joint_inference(self,nu_int,td_uncertainty=2.,
+    def H0_gamma_lens_joint_inference(self,nu_int,lens_idxs=None,
             num_emcee_samps=6000):
         """ Joint inference for mu(gamma_lens),sigma(gamma_lens), and H0
             which requires many evaluations of the predicted time delay
@@ -486,22 +490,25 @@ class LensSample:
         Args:
             nu_int (scipy.stats object): stores probability distribution for
                 interim lens modeling prior
-            td_uncertainty ([float]): measurement error on time delay measurements
-                (default=2.)
+            lens_idxs ([int]): which lenses to include in the inference. 
+                Default=None means use all
             num_emcee_samps (int): # samples during MCMC
 
         Returns:    
             emcee sampler.chain (n_walkers,n_samples)
         """
-        
-        n_lenses = len(self.lens_df)
+        if lens_idxs is None:
+            lens_idxs = range(0,len(self.lens_df))
+        n_lenses = len(lens_idxs)
+
         # TODO: hardcoded for quads!
         all_lenses_fpd_samps = np.empty((n_lenses,3,int(1e3)))
         all_lenses_gamma_samps = np.empty((n_lenses,int(1e3)))
         all_lenses_gamma_log_nu_int = np.empty((n_lenses,int(1e3)))
 
         # loop thru each lens
-        for r in range(0,n_lenses):
+        tik_setup = time.time()
+        for i,r in enumerate(lens_idxs):
             # samples of fermat potential diffs. & corresponding gamma_lens
             fpd_samps,gamma_lens_samps = self.pred_fpd_samples(r,
                 n_samps=int(1e3),gamma_lens=True)
@@ -510,18 +517,24 @@ class LensSample:
 
             # TODO: fix here to account for not quads!
             if len(fpd_samps) == 3:
-                all_lenses_fpd_samps[r] = fpd_samps
+                all_lenses_fpd_samps[i] = fpd_samps
             elif len(fpd_samps) == 2:
-                all_lenses_fpd_samps[r,0:2] = fpd_samps
-                all_lenses_fpd_samps[r,2] = np.nan*np.ones(len(gamma_lens_samps))
+                all_lenses_fpd_samps[i,0:2] = fpd_samps
+                all_lenses_fpd_samps[i,2] = np.nan*np.ones(len(gamma_lens_samps))
             elif len(fpd_samps) ==1:
-                all_lenses_fpd_samps[r,0] = fpd_samps
-                all_lenses_fpd_samps[r,1:] = np.nan*np.ones((2,len(gamma_lens_samps)))
-            all_lenses_gamma_samps[r] = gamma_lens_samps
-            all_lenses_gamma_log_nu_int[r] = gamma_samps_nu_int
+                all_lenses_fpd_samps[i,0] = fpd_samps
+                all_lenses_fpd_samps[i,1:] = np.nan*np.ones((2,len(gamma_lens_samps)))
+            all_lenses_gamma_samps[i] = gamma_lens_samps
+            all_lenses_gamma_log_nu_int[i] = gamma_samps_nu_int
 
         # now that we've constructed our list of samples, use those to construct
         # a log posterior function
+        tok_setup = time.time()
+
+        print("Time to compute fpd samples: %.3f seconds"%(tok_setup-tik_setup))
+
+        # Timing stuff
+        likelihood_times = []
 
         def h0_gamma_log_prior(hyperparams):
             """
@@ -541,19 +554,26 @@ class LensSample:
             """
             Assumes ordering: h0, mu(gamma_lens), sigma(gamma_lens)
             """
-            
+            tik = time.time()
             log_likelihood = 0
 
-            for r in range(0,len(self.lens_df)):
+            my_cosmo = FlatLambdaCDM(H0=hyperparams[0],Om0=0.3,Ob0=0.049)
+            # defaults: 'Ob0': 0.049, 'sigma8': 0.81, 'ns': 0.95            
+            #colossus_cosmo = fromAstropy(my_cosmo,sigma8=0.81,ns=0.95,
+            #    cosmo_name='my_cosmo',interpolation=True)
+
+            for i,r in enumerate(lens_idxs):
                 # compute predicted td
                 z_lens = self.lens_df.loc[r,'z_lens']
                 z_src = self.lens_df.loc[r,'z_src']
                 # remember this returns a quantity not a number
                 ddt_proposed = tdc_utils.ddt_from_redshifts(
-                    FlatLambdaCDM(H0=hyperparams[0],Om0=0.3),z_lens,z_src).value
+                    my_cosmo,z_lens,z_src).value
                 
+                #ddt_proposed = tdc_utils.ddt_from_redshifts_colossus(colossus_cosmo,z_lens,z_src)
+
                 # fpd samps has shape (num_images,num_samples)
-                fpd_samps = all_lenses_fpd_samps[r]
+                fpd_samps = all_lenses_fpd_samps[i]
                 # doubles
                 if np.isnan(fpd_samps[1,0]):
                     fpd_samps = fpd_samps[0,:]
@@ -576,18 +596,19 @@ class LensSample:
                 td_measured = td_measured[0:to_idx]
 
                 # construct td_cov based on # of images
-                # TODO: fix this for single time delay case!
-                td_cov = np.eye(
-                    len(td_measured))*(td_uncertainty**2)
+                td_uncertainty = self.lens_df.loc[r,['td01_stddev',
+                    'td02_stddev','td03_stddev']].astype(np.float32)
+                td_uncertainty = td_uncertainty[0:to_idx]
+                td_cov = np.diag(td_uncertainty**2)
 
                 # TODO: needs to handle quads & doubles @ the same time!
                 td_log_likelihood = tdc_utils.td_log_likelihood(td_measured,
                     td_cov,td_pred).astype(np.float64)
 
                 # reweighting factor
-                eval_at_nu = norm.logpdf(all_lenses_gamma_samps[r],
+                eval_at_nu = norm.logpdf(all_lenses_gamma_samps[i],
                     loc=hyperparams[1],scale=hyperparams[2])
-                rw_factor = eval_at_nu - all_lenses_gamma_log_nu_int[r]
+                rw_factor = eval_at_nu - all_lenses_gamma_log_nu_int[i]
 
                 # sum across xi_k samples
                 individ_likelihood = np.mean(np.exp(td_log_likelihood+rw_factor))
@@ -595,8 +616,14 @@ class LensSample:
                 # TODO need to deal with this overflow issue another way...
                 if individ_likelihood == 0:
                     return -np.inf
+                log_individ_likelihood = np.log(individ_likelihood)
+                if np.isnan(log_individ_likelihood):
+                    return -np.inf
 
-                log_likelihood += np.log(individ_likelihood)
+                log_likelihood += log_individ_likelihood
+
+            tok = time.time()
+            likelihood_times.append(tok-tik)
 
             return log_likelihood
         
@@ -630,9 +657,15 @@ class LensSample:
         #cur_state[:,2] = norm.rvs(loc=0.1,scale=0.02,size=n_walkers)
 
         # run mcmc
+        tik_mcmc = time.time()
         _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps)
+        tok_mcmc = time.time()
+        print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+
+        print("Avg. Time to Evaluate Likelihood: %.3f seconds"%(np.mean(likelihood_times)))
 
         return sampler.chain
+    
 
 # make this one inherited too so we don't have to rewrite stuff
 class ModeledLensSample(LensSample):
