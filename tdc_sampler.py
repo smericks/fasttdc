@@ -33,7 +33,7 @@ def preprocess_td_measured(td_measured,td_cov,fpd_samples):
     Returns:
         array of td_measured_padded (n_lenses,3)
         array of fpd_samples_padded (n_lenses,n_fpd_samples,3)
-        array of prefactors: (1/(2pi)^k/2) * 1/sqrt(det(Sigma))
+        array of log-space additive prefactors: log( (1/(2pi)^k/2) * 1/sqrt(det(Sigma)) )
             - doubles: k=1,det(Sigma)=det([sigma^2])
             - quads: k=3, det(Sigma)=det(Sigma)
         array of precision matrices: 
@@ -74,7 +74,7 @@ def preprocess_td_measured(td_measured,td_cov,fpd_samples):
                 "lens %d has %d time delays"%(l,len(td_measured[l]))))
             raise ValueError
         
-    return td_measured_padded, fpd_samples_padded, td_likelihood_prefactors, td_likelihood_prec
+    return td_measured_padded, fpd_samples_padded, np.log(td_likelihood_prefactors), td_likelihood_prec
 
 
 ###########################
@@ -106,10 +106,10 @@ class TDCLikelihood():
         """
 
         # no processing needed
-        self.z_lens = z_lens
-        self.z_src = z_src
+        self.z_lens = np.asarray(z_lens)
+        self.z_src = np.asarray(z_src)
         self.gamma_pred_samples = gamma_pred_samples
-        num_fpd_samples = len(fpd_pred_samples[0][0])
+        self.num_fpd_samples = len(fpd_pred_samples[0][0])
 
         # padding
         (td_measured_padded,fpd_samples_padded,td_likelihood_prefactors,
@@ -120,11 +120,11 @@ class TDCLikelihood():
         self.fpd_samples_padded = fpd_samples_padded
         # pad with a 2nd batch dim for # of fpd samples
         self.td_measured_padded = np.repeat(td_measured_padded[:, np.newaxis, :],
-            num_fpd_samples, axis=1)
+            self.num_fpd_samples, axis=1)
         self.td_likelihood_prefactors = np.repeat(td_likelihood_prefactors[:, np.newaxis],
-            num_fpd_samples, axis=1)
+            self.num_fpd_samples, axis=1)
         self.td_likelihood_prec = np.repeat(td_likelihood_prec[:, np.newaxis, :, :],
-            num_fpd_samples, axis=1)
+            self.num_fpd_samples, axis=1)
 
 
         # TODO: fix hardcoding of this
@@ -148,38 +148,39 @@ class TDCLikelihood():
                     Omega_c=jnp.float32(0.3),
                     Omega_k=jnp.float32(0.),Omega_b=jnp.float32(0.0), w0=jnp.float32(-1.),
                     wa=jnp.float32(0.),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
-        # Q1: can jax-cosmo do arrays of redshifts?
-        # compute time delay distance from cosmology and redshifts
+        
+        # compute time delay distances from cosmology and redshifts
         Ddt_computed = tdc_utils.jax_ddt_from_redshifts(my_jax_cosmo,self.z_lens,self.z_src)
+        # add batch dimensions for Ddt computed...
+        Ddt_repeated = np.repeat(Ddt_computed[:, np.newaxis],
+            self.num_fpd_samples, axis=1)
+        Ddt_repeated = np.repeat(Ddt_repeated[:,:, np.newaxis],
+            3, axis=2)
         # compute predicted time delays (this function should work w/ arrays)
-        # TODO: might have to add a batch dimension for Ddt computed...
-        return tdc_utils.td_from_ddt_fpd(Ddt_computed,self.fpd_samples_padded)
+        return tdc_utils.td_from_ddt_fpd(Ddt_repeated,self.fpd_samples_padded)
 
     # TDC Likelihood per lens per fpd sample (only condense along num. images dim.)
-    def td_likelihood_per_samp(self,td_pred_samples):
+    def td_log_likelihood_per_samp(self,td_pred_samples):
         """
         Args:
             td_pred_samples (n_lenses,n_fpd_samps,3)
 
         Returns:
-            td_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
+            td_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
         """
 
         x_minus_mu = (td_pred_samples-self.td_measured_padded)
+        # add batch dimension for # of time delays dim.
         x_minus_mu = np.expand_dims(x_minus_mu,axis=-1)
-        print('x_minus_mu shape',x_minus_mu.shape)
-        print('td_likelihood_prec shape',self.td_likelihood_prec.shape)
-        print('testing')
-        np.matmul(self.td_likelihood_prec,x_minus_mu)
-        print('test passed')
+        # matmul should condense the (# of time delays) dim.
         exponent = -0.5*np.matmul(np.transpose(x_minus_mu,axes=(0,1,3,2)),
             np.matmul(self.td_likelihood_prec,x_minus_mu))
 
+        # reduce to two dimensions: (n_lenses,n_fpd_samples)
         exponent = np.squeeze(exponent)
 
-        print('exponent shape: ',exponent.shape)
-
-        return self.td_likelihood_prefactors*np.exp(exponent)
+        # TODO: should I change this to log-likelihood?
+        return self.td_likelihood_prefactors + exponent
         
         
     def full_log_likelihood(self,hyperparameters):
@@ -193,7 +194,7 @@ class TDCLikelihood():
         # TODO: construct td_pred_samples from fpd_pred_samples
         td_pred_samples = self.td_pred_from_fpd_pred(hyperparameters)
 
-        td_likelihoods = self.td_likelihood_per_samp(td_pred_samples)
+        td_log_likelihoods = self.td_log_likelihood_per_samp(td_pred_samples)
 
         # reweighting factor
         eval_at_proposed_nu = norm.logpdf(self.gamma_pred_samples,
@@ -201,12 +202,13 @@ class TDCLikelihood():
         rw_factor = eval_at_proposed_nu - self.log_prob_modeling_prior
 
         # sum across fpd samples 
-        individ_likelihood = np.mean(np.exp(td_likelihoods+rw_factor),axis=1)
+        individ_likelihood = np.mean(np.exp(td_log_likelihoods+rw_factor),axis=1)
 
         # sum over all lenses
         # TODO: check for any log of zero!!
         if np.sum(individ_likelihood == 0) > 0:
             return -np.inf
+
         log_likelihood = np.sum(np.log(individ_likelihood))
 
         return log_likelihood

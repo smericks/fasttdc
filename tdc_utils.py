@@ -15,11 +15,11 @@ def jax_ddt_from_redshifts(my_cosmology,z_lens,z_src):
 
     Args:
         my_cosmology (jax-cosmo Cosmology): jax-cosmo cosmology object
-        z_lens (float): lens redshift
-        z_src (float): source redshift
+        z_lens ([float]): lens redshifts
+        z_src ([float]): source redshifts
 
     Returns:
-        ddt (jaxlib.xla_extension.ArrayImpl): time delay distance in Mpc 
+        ddt (jax array): time delay distances in Mpc 
     """
 
     # translate redshift to scale factor
@@ -35,7 +35,7 @@ def jax_ddt_from_redshifts(my_cosmology,z_lens,z_src):
 
     Ddt = (1+z_lens)*D_d*D_s/D_ds
 
-    return Ddt[0]
+    return Ddt
 
 def ddt_from_redshifts_colossus(my_cosmology,z_lens,z_src):
     """
