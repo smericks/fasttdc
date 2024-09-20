@@ -1,9 +1,11 @@
 import jax_cosmo
 import jax.numpy as jnp
 import numpy as np
-from scipy.stats import norm
+from scipy.stats import norm, uniform
 from om10_lens_sample import OM10Sample
 import tdc_utils
+import emcee
+import time
 
 #################################
 # Preprocessing of TDC Quantities
@@ -105,9 +107,11 @@ class TDCLikelihood():
                 set of fpd samples.
         """
 
-        # no processing needed
-        self.z_lens = np.asarray(z_lens)
-        self.z_src = np.asarray(z_src)
+        # no processing needed (np.squeeze ensures any dimensions of size 1
+        #    are removed)
+        self.z_lens = np.squeeze(np.asarray(z_lens))
+        self.z_src = np.squeeze(np.asarray(z_src))
+        # make sure the dims are right
         self.gamma_pred_samples = gamma_pred_samples
         self.num_fpd_samples = len(fpd_pred_samples[0][0])
 
@@ -151,6 +155,8 @@ class TDCLikelihood():
         
         # compute time delay distances from cosmology and redshifts
         Ddt_computed = tdc_utils.jax_ddt_from_redshifts(my_jax_cosmo,self.z_lens,self.z_src)
+        # convert to numpy
+        Ddt_computed = np.array(Ddt_computed)
         # add batch dimensions for Ddt computed...
         Ddt_repeated = np.repeat(Ddt_computed[:, np.newaxis],
             self.num_fpd_samples, axis=1)
@@ -219,24 +225,25 @@ class TDCLikelihood():
 #########################
 
 def fast_TDC(td_measured,td_cov,z_lens,z_src,
-    fpd_pred_samples,gamma_pred_samples):
+    fpd_pred_samples,gamma_pred_samples,num_emcee_samps=1000):
     """
     Args:
-        td_measured ()
-        td_cov ()
+        td_measured (np.array(float), size:(n_lenses,3)): list of 1d arrays of 
+            time delay measurements for each lens, doubles padded with Nans
+        td_cov (np.array(float), size:(n_lenses,3,3)): list of 2d arrays of 
+            time delay covariance matrices, doubles padded with Nans
         z_lens (size:(n_lenses))
         z_src (size:(n_lenses))
-        fpd_pred_samples ()
+        fpd_samples (list of [float,float]): list of !!variable size!! 2d arrays
+            of fpd samples. Some will have dim (1,n_samples), others will have dim
+            (3,n_samples)
         gamma_pred_samples ( size:(n_lenses,num_fpd_samples))
+        num_emcee_samps (int): Number of iterations for MCMC inference
         
     """
 
-    num_fpd_samples = len(fpd_pred_samples[0][0])
-
     tdc_likelihood = TDCLikelihood(td_measured,td_cov,z_lens,z_src,
         fpd_pred_samples,gamma_pred_samples)
-    
-    # put the function def here so it can use pre-computed quantities
 
     def log_prior(hyperparameters):
         """
@@ -266,31 +273,25 @@ def fast_TDC(td_measured,td_cov,z_lens,z_src,
         return lp
     
     # TODO: emcee stuff here
+    # 10 walkers, 3 dimensions
+    n_walkers = 10
+    sampler = emcee.EnsembleSampler(n_walkers,3,log_posterior)
+    # create initial state
+    cur_state = np.empty((10,3))
+    # fill h0 initial state
+    cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers)
+    #cur_state[:,0] = norm.rvs(loc=70,scale=5,size=n_walkers)
+    # fill mu(gamma_lens) initial state
+    cur_state[:,1] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
+    #cur_state[:,1] = norm.rvs(loc=2.05,scale=0.02,size=n_walkers)
+    # fill sigma(gamma_lens) initial state
+    cur_state[:,2] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+    #cur_state[:,2] = norm.rvs(loc=0.1,scale=0.02,size=n_walkers)
 
-om10_sample = OM10Sample('om10_metadata_venkatraman24.csv')
-om10_sample.choose_gold_silver()
-gold_modeling_error_dict={
-    'theta_E':0.01,
-	'gamma':0.06,
-	'e1':0.05,
-    'e2':0.05,
-	'center_x':0.01,
-	'center_y':0.01,
-	'gamma1':0.05,
-    'gamma2':0.05,
-	'src_center_x':0.02,
-	'src_center_y':0.02
-}
-silver_modeling_error_dict={
-    'theta_E':0.05,
-	'gamma':0.1,
-	'e1':0.07,
-    'e2':0.07,
-	'center_x':0.03,
-	'center_y':0.03,
-	'gamma1':0.07,
-    'gamma2':0.07,
-	'src_center_x':0.04,
-	'src_center_y':0.04
-}
-om10_sample.populate_modeling_preds(gold_modeling_error_dict,silver_modeling_error_dict)
+    # run mcmc
+    tik_mcmc = time.time()
+    _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps)
+    tok_mcmc = time.time()
+    print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+
+    return sampler.chain

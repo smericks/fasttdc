@@ -94,7 +94,6 @@ def td_from_ddt_fpd(Ddt,delta_phi):
     Ddt_km = Ddt*Mpc_in_km
     # convert delta_phi from arcsec^2 to radian^2
     delta_phi_rad = delta_phi*arcsec_in_rad**2
-
     delta_t_sec = Ddt_km*delta_phi_rad/C_kmpersec
 
     return delta_t_sec/(24*60*60) #24hrs, 60mins, 60sec

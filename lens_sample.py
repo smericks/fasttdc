@@ -4,6 +4,8 @@ import pandas as pd
 from scipy.stats import norm, truncnorm, uniform
 import emcee
 import time
+import jax_cosmo
+import jax.numpy as jnp
 
 # lenstronomy stuff
 from astropy.cosmology import FlatLambdaCDM
@@ -345,10 +347,53 @@ class LensSample:
                 truth_td = self.lens_df.loc[r,'td0'+str(j+1)]
                 if np.isnan(truth_td):
                     self.lens_df.loc[r,'td0'+str(j+1)+'_measured'] = np.nan
+                    self.lens_df.loc[r,'td0'+str(j+1)+'_stddev'] = np.nan
 
-                measured_td = norm.rvs(loc=truth_td,scale=measurement_error)
-                self.lens_df.loc[r,'td0'+str(j+1)+'_measured'] = measured_td
-                self.lens_df.loc[r,'td0'+str(j+1)+'_stddev'] = measurement_error
+                else:
+                    measured_td = norm.rvs(loc=truth_td,scale=measurement_error)
+                    self.lens_df.loc[r,'td0'+str(j+1)+'_measured'] = measured_td
+                    self.lens_df.loc[r,'td0'+str(j+1)+'_stddev'] = measurement_error
+
+    def tdc_sampler_input(self,lens_idxs,num_fpd_samps=int(1e3)):
+        """
+        Args:
+            lens_idxs ([int]): which lenses to return
+            num_fpd_samps (int): default=1e3
+        Returns:
+            td_measured (n_lenses,3): doubles are padded with nans
+            td_cov (n_lenses,3,3): currently diagonal, doubles are padded with Nans on the 
+                diagonal 
+            fpd_pred_samples (n_lenses,n_images-1,n_fpd_samples): list of 
+                !!variable length!! arrays of fpd samples
+            gamma_pred_samples (n_lenses,n_samples): list of arrays of power-law slope (gamma) samples
+
+        """
+        # just make what's most convenient here and then go back and re-write the preprocess function
+
+        # if not populated yet, fill it in!
+        if 'td01_measured' not in self.lens_df.keys():
+            self.populate_measured_time_delays()
+
+        td_measured = self.lens_df.loc[lens_idxs, ['td01_measured', 'td02_measured', 'td03_measured']].to_numpy()
+        td_cov = np.zeros((len(lens_idxs),3,3))
+
+        for i in range(0,3):
+            td_cov[:,i,i] = np.squeeze(self.lens_df.loc[lens_idxs,['td0'+str(i+1)+'_stddev']].to_numpy())**2
+
+        fpd_pred_samples_list = []
+        gamma_samples_list = []
+        for l in lens_idxs:
+            fpd_samps,gamma_lens_samps = self.pred_fpd_samples(l,
+                n_samps=num_fpd_samps,gamma_lens=True)
+        
+            fpd_pred_samples_list.append(fpd_samps)
+            gamma_samples_list.append(gamma_lens_samps)
+
+        z_lens = self.lens_df.loc[lens_idxs, ['z_lens']].to_numpy()
+        z_src = self.lens_df.loc[lens_idxs, ['z_src']].to_numpy()
+
+        return td_measured,td_cov,z_lens,z_src,fpd_pred_samples_list,gamma_samples_list
+
 
     def Ddt_posterior(self,lens_idx):
         """Infers Ddt posterior for a single lens using _pred, _stddev 
@@ -535,6 +580,7 @@ class LensSample:
 
         # Timing stuff
         likelihood_times = []
+        ddt_times = []
 
         def h0_gamma_log_prior(hyperparams):
             """
@@ -556,21 +602,27 @@ class LensSample:
             """
             tik = time.time()
             log_likelihood = 0
-
-            my_cosmo = FlatLambdaCDM(H0=hyperparams[0],Om0=0.3,Ob0=0.049)
-            # defaults: 'Ob0': 0.049, 'sigma8': 0.81, 'ns': 0.95            
-            #colossus_cosmo = fromAstropy(my_cosmo,sigma8=0.81,ns=0.95,
-            #    cosmo_name='my_cosmo',interpolation=True)
+            running_ddt_calc = 0
+            #my_cosmo = FlatLambdaCDM(H0=hyperparams[0],Om0=0.3)
+            
+            my_jax_cosmo = jax_cosmo.Cosmology(h=jnp.float32(hyperparams[0]/100),
+                Omega_c=jnp.float32(0.3),
+                Omega_k=jnp.float32(0.),Omega_b=jnp.float32(0.0), w0=jnp.float32(-1.),
+                wa=jnp.float32(0.),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
 
             for i,r in enumerate(lens_idxs):
                 # compute predicted td
                 z_lens = self.lens_df.loc[r,'z_lens']
                 z_src = self.lens_df.loc[r,'z_src']
                 # remember this returns a quantity not a number
-                ddt_proposed = tdc_utils.ddt_from_redshifts(
-                    my_cosmo,z_lens,z_src).value
+                #ddt_proposed = tdc_utils.ddt_from_redshifts(
+                #    my_cosmo,z_lens,z_src).value
                 
-                #ddt_proposed = tdc_utils.ddt_from_redshifts_colossus(colossus_cosmo,z_lens,z_src)
+                tik_ddt = time.time()
+                ddt_proposed = float(tdc_utils.jax_ddt_from_redshifts(my_jax_cosmo,
+                    jnp.float32(z_lens),jnp.float32(z_src))[0])
+                tok_ddt = time.time()
+                running_ddt_calc += (tok_ddt-tik_ddt)
 
                 # fpd samps has shape (num_images,num_samples)
                 fpd_samps = all_lenses_fpd_samps[i]
@@ -624,7 +676,7 @@ class LensSample:
 
             tok = time.time()
             likelihood_times.append(tok-tik)
-
+            ddt_times.append(running_ddt_calc)
             return log_likelihood
         
         def h0_gamma_log_posterior(hyperparams):
@@ -663,6 +715,8 @@ class LensSample:
         print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
 
         print("Avg. Time to Evaluate Likelihood: %.3f seconds"%(np.mean(likelihood_times)))
+        print("Avg. Time to Compute Ddts: %.3f seconds"%(np.mean(ddt_times)))
+
 
         return sampler.chain
     
