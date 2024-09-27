@@ -52,6 +52,9 @@ class TDCSamplerTests(unittest.TestCase):
         z_src = [1.2,1.3]
         my_tdc = tdc_sampler.TDCLikelihood(self.td_measured,self.td_cov,
             z_lens,z_src,self.fpd_pred_samples,self.gamma_pred_samples)
+        my_w0wa_tdc = tdc_sampler.TDCLikelihood(self.td_measured,self.td_cov,
+            z_lens,z_src,self.fpd_pred_samples,self.gamma_pred_samples,
+            cosmo_model='w0waCDM')
         
         # FUNCTION 1: td_log_likelihood_per_samp
         td_pred_samples = my_tdc.fpd_samples_padded*1.2
@@ -75,34 +78,41 @@ class TDCSamplerTests(unittest.TestCase):
         # FUNCTION 3: full_log_likelihood(hyperparameters)
         # make population mu/sigma(gamma_lens) same as the prior so the rw.
         # factor is just 1
-        hyperparameters = [70.,2.0,0.2]
-        log_likelihood = my_tdc.full_log_likelihood(hyperparameters)
 
-        # TODO: should do the math & compare with what this outputs
-        td_pred_samples = my_tdc.td_pred_from_fpd_pred(hyperparameters)
+        def likelihood_test_case(my_tdc,hyperparameters):
         
-        # lens 1 (the double)
-        lens1_likelihood = 0
-        for f in range(0,5):
-            my_pred = td_pred_samples[0][f][0]
-            exponent = -0.5*(my_pred - self.td_measured[0][0])**2 / self.td_cov[0][0][0]
-            prefactor = 1/np.sqrt(2*np.pi) * 1/np.sqrt(self.td_cov[0][0][0])
-            lens1_likelihood += prefactor * np.exp(exponent)
+            log_likelihood = my_tdc.full_log_likelihood(hyperparameters)
 
-        lens1_likelihood = lens1_likelihood/5
+            # TODO: should do the math & compare with what this outputs
+            td_pred_samples = my_tdc.td_pred_from_fpd_pred(hyperparameters)
             
-        # lens 2 (the quad)
-        lens2_likelihood = 0
-        for f in range(0,5):
-            my_pred = np.asarray(td_pred_samples[1][f])
-            x_minus_mu = (my_pred-np.asarray(self.td_measured[1]))
-            prec_mat = np.linalg.inv(self.td_cov[1])
-            exponent = -0.5 * np.matmul(x_minus_mu,np.matmul(prec_mat,x_minus_mu))
-            prefactor = (1/(2*np.pi))**(3/2) * 1/np.sqrt(np.linalg.det(self.td_cov[1]))
-            lens2_likelihood += prefactor*np.exp(exponent)
+            # lens 1 (the double)
+            lens1_likelihood = 0
+            for f in range(0,5):
+                my_pred = td_pred_samples[0][f][0]
+                exponent = -0.5*(my_pred - self.td_measured[0][0])**2 / self.td_cov[0][0][0]
+                prefactor = 1/np.sqrt(2*np.pi) * 1/np.sqrt(self.td_cov[0][0][0])
+                lens1_likelihood += prefactor * np.exp(exponent)
 
-        lens2_likelihood /= 5
+            lens1_likelihood = lens1_likelihood/5
+                
+            # lens 2 (the quad)
+            lens2_likelihood = 0
+            for f in range(0,5):
+                my_pred = np.asarray(td_pred_samples[1][f])
+                x_minus_mu = (my_pred-np.asarray(self.td_measured[1]))
+                prec_mat = np.linalg.inv(self.td_cov[1])
+                exponent = -0.5 * np.matmul(x_minus_mu,np.matmul(prec_mat,x_minus_mu))
+                prefactor = (1/(2*np.pi))**(3/2) * 1/np.sqrt(np.linalg.det(self.td_cov[1]))
+                lens2_likelihood += prefactor*np.exp(exponent)
 
-        combined_log_likelihood = np.log(lens1_likelihood) + np.log(lens2_likelihood)
-        
-        self.assertAlmostEqual(combined_log_likelihood,log_likelihood)
+            lens2_likelihood /= 5
+
+            combined_log_likelihood = np.log(lens1_likelihood) + np.log(lens2_likelihood)
+            
+            self.assertAlmostEqual(combined_log_likelihood,log_likelihood)
+
+        # LCDM case
+        likelihood_test_case(my_tdc,hyperparameters = [70.,2.0,0.2])
+        # w0waCDM case
+        likelihood_test_case(my_w0wa_tdc,hyperparameters=[70,-1.,0.,2.0,0.2])

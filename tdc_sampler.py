@@ -88,7 +88,7 @@ def preprocess_td_measured(td_measured,td_cov,fpd_samples):
 class TDCLikelihood():
 
     def __init__(self,td_measured,td_cov,z_lens,z_src,fpd_pred_samples,
-        gamma_pred_samples):
+        gamma_pred_samples,cosmo_model='LCDM'):
         """
         Keep track of quantities that remain constant throughout the inference
 
@@ -105,12 +105,14 @@ class TDCLikelihood():
             gamma_pred_samples (np.array(float), size:(n_lenses,n_samples)): 
                 list of 1d arrays of list of gamma samples associated with each 
                 set of fpd samples.
+            cosmo_model (string): 'LCDM' or 'w0waCDM'
         """
 
         # no processing needed (np.squeeze ensures any dimensions of size 1
         #    are removed)
         self.z_lens = np.squeeze(np.asarray(z_lens))
         self.z_src = np.squeeze(np.asarray(z_src))
+        self.cosmo_model = cosmo_model
         # make sure the dims are right
         self.gamma_pred_samples = gamma_pred_samples
         self.num_fpd_samples = len(fpd_pred_samples[0][0])
@@ -148,10 +150,17 @@ class TDCLikelihood():
         """
 
         # construct cosmology object from hyperparameters
-        my_jax_cosmo = jax_cosmo.Cosmology(h=jnp.float32(hyperparameters[0]/100),
+        h0_input = hyperparameters[0]
+        if self.cosmo_model == 'LCDM':
+             w0_input = -1.
+             wa_input = 0.
+        elif self.cosmo_model == 'w0waCDM':
+             w0_input = hyperparameters[1]
+             wa_input = hyperparameters[2]
+        my_jax_cosmo = jax_cosmo.Cosmology(h=jnp.float32(h0_input/100),
                     Omega_c=jnp.float32(0.3),
-                    Omega_k=jnp.float32(0.),Omega_b=jnp.float32(0.0), w0=jnp.float32(-1.),
-                    wa=jnp.float32(0.),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
+                    Omega_k=jnp.float32(0.),Omega_b=jnp.float32(0.0), w0=jnp.float32(w0_input),
+                    wa=jnp.float32(wa_input),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
         
         # compute time delay distances from cosmology and redshifts
         Ddt_computed = tdc_utils.jax_ddt_from_redshifts(my_jax_cosmo,self.z_lens,self.z_src)
@@ -192,7 +201,7 @@ class TDCLikelihood():
     def full_log_likelihood(self,hyperparameters):
         """
         Args:
-            hyperparameters ([H0,mu_gamma,sigma_gamma])
+            hyperparameters ([H0,mu_gamma,sigma_gamma] or [H0,w0,wa,mu_gamma,sigma_gamma])
             fpd_pred_samples (size:(n_lenses,n_samples,3)): Note, it is assumed 
                 that doubles are padded w/ zeros
         """
@@ -204,7 +213,7 @@ class TDCLikelihood():
 
         # reweighting factor
         eval_at_proposed_nu = norm.logpdf(self.gamma_pred_samples,
-            loc=hyperparameters[1],scale=hyperparameters[2])
+            loc=hyperparameters[-2],scale=hyperparameters[-1])
         rw_factor = eval_at_proposed_nu - self.log_prob_modeling_prior
 
         # sum across fpd samples 
@@ -225,7 +234,8 @@ class TDCLikelihood():
 #########################
 
 def fast_TDC(td_measured,td_cov,z_lens,z_src,
-    fpd_pred_samples,gamma_pred_samples,num_emcee_samps=1000):
+    fpd_pred_samples,gamma_pred_samples,num_emcee_samps=1000,
+    cosmo_model='LCDM'):
     """
     Args:
         td_measured (np.array(float), size:(n_lenses,3)): list of 1d arrays of 
@@ -239,13 +249,14 @@ def fast_TDC(td_measured,td_cov,z_lens,z_src,
             (3,n_samples)
         gamma_pred_samples ( size:(n_lenses,num_fpd_samples))
         num_emcee_samps (int): Number of iterations for MCMC inference
+        cosmo_model (string): 'LCDM' or 'w0waCDM'
         
     """
 
     tdc_likelihood = TDCLikelihood(td_measured,td_cov,z_lens,z_src,
-        fpd_pred_samples,gamma_pred_samples)
+        fpd_pred_samples,gamma_pred_samples,cosmo_model=cosmo_model)
 
-    def log_prior(hyperparameters):
+    def LCDM_log_prior(hyperparameters):
         """
         Args:
             hyperparameters ([H0,mu_gamma,sigma_gamma])
@@ -260,13 +271,64 @@ def fast_TDC(td_measured,td_cov,z_lens,z_src,
         
         return 0
     
+    def w0waCDM_log_prior(hyperparameters):
+        """
+        Args:
+            hyperparameters ([H0,w0,wa,mu_gamma,sigma_gamma])
+        """
+
+        if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+                return -np.inf
+        elif hyperparameters[0] < -11 or hyperparameters[0] > 9: #w0 (centered -1)
+                return -np.inf
+        elif hyperparameters[0] < -10 or hyperparameters[0] > 10: #wa (centered 0)
+                return -np.inf
+        elif hyperparameters[1] < 1.5 or hyperparameters[1] > 2.5: #mu(gamma)
+            return -np.inf
+        elif hyperparameters[2] < 0.001 or hyperparameters[2] > 0.2: #sigma(gamma)
+            return -np.inf
+        
+        return 0
+    
+    def generate_initial_state(n_walkers,cosmo_model):
+        """
+        Args:
+            cosmo_model (string)
+        """
+
+        if cosmo_model == 'LCDM':
+            cur_state = np.empty((n_walkers,3))
+            # fill h0 initial state
+            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers)
+            cur_state[:,1] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
+            cur_state[:,2] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+
+            return cur_state
+        
+        elif cosmo_model == 'w0waCDM':
+            cur_state = np.empty((n_walkers,5))
+            # fill h0 initial state
+            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers)
+            cur_state[:,1] = uniform.rvs(loc=-3,scale=4,size=n_walkers)
+            cur_state[:,2] = uniform.rvs(loc=-2,scale=4,size=n_walkers)
+            cur_state[:,3] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
+            cur_state[:,4] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+
+            return cur_state
+
+
+    
     def log_posterior(hyperparameters):
         """
         Args:
-            hyperparameters ([H0,mu_gamma,sigma_gamma])
+            hyperparameters ([H0,mu_gamma,sigma_gamma] or [H0,w0,wa,mu_gamma,sigma_gamma])
         """
-
-        lp = log_prior(hyperparameters)
+        # Prior
+        if cosmo_model == 'LCDM':
+            lp = LCDM_log_prior(hyperparameters)
+        elif cosmo_model == 'w0waCDM':
+            lp = w0waCDM_log_prior(hyperparameters)
+        # Likelihood
         if lp == 0:
             lp += tdc_likelihood.full_log_likelihood(hyperparameters)
 
@@ -276,17 +338,7 @@ def fast_TDC(td_measured,td_cov,z_lens,z_src,
     # 10 walkers, 3 dimensions
     n_walkers = 10
     sampler = emcee.EnsembleSampler(n_walkers,3,log_posterior)
-    # create initial state
-    cur_state = np.empty((10,3))
-    # fill h0 initial state
-    cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers)
-    #cur_state[:,0] = norm.rvs(loc=70,scale=5,size=n_walkers)
-    # fill mu(gamma_lens) initial state
-    cur_state[:,1] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
-    #cur_state[:,1] = norm.rvs(loc=2.05,scale=0.02,size=n_walkers)
-    # fill sigma(gamma_lens) initial state
-    cur_state[:,2] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
-    #cur_state[:,2] = norm.rvs(loc=0.1,scale=0.02,size=n_walkers)
+    cur_state = generate_initial_state(n_walkers,cosmo_model)
 
     # run mcmc
     tik_mcmc = time.time()
