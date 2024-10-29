@@ -13,8 +13,8 @@ def eplshear_fp_samples(x_im,y_im,lens_model_samps,x_src_samps,
         LENS MODEL SAMPLES MUST BE PROVIDED IN A SPECIFIC ORDER!!
             (theta_E, gamma1, gamma2, gamma, e1, e2, center_x, center_y)
     Args:
-        x_im ([float]), shape=(4,): ra image positions
-        y_im ([float]), shape=(4,): dec image positions
+        x_im ([float]), shape=(n_images,): ra image positions
+        y_im ([float]), shape=(n_images,): dec image positions
         lens_model_samps ([float,float]), shape=(n_samps,8): samples from lens 
             model posterior in the order: (theta_E, gamma1, gamma2, gamma, e1, e2, center_x, center_y)
         x_src_samps ([float]), shape=(n_samps,): samples for x_src (ra)
@@ -22,11 +22,12 @@ def eplshear_fp_samples(x_im,y_im,lens_model_samps,x_src_samps,
 
 
     Returns:
-        a list of fp samples size (n_samps,4)
+        a list of fp samples size (n_samps,n_images)
     
     """
 
     n_samps = np.shape(lens_model_samps)[0]
+    n_images = np.shape(x_im)[0]
 
     # add batch dim to x_im,y_im
     x_im = np.repeat(x_im[np.newaxis,:],n_samps, axis=0)
@@ -37,34 +38,55 @@ def eplshear_fp_samples(x_im,y_im,lens_model_samps,x_src_samps,
 
     # batched epl_numba calculation
     # lp = lensing potential
-    epl_lp_samps = epl_lp(x=x_im, y=y_im,
-        theta_E=lens_model_samps[:,0],gamma=lens_model_samps[:,3],
-        e1=lens_model_samps[:,4],e2=lens_model_samps[:,5],
-        center_x=lens_model_samps[:,6],center_y=lens_model_samps[:,7])
+    #epl_lp_samps = epl_lp(x=x_im, y=y_im,
+    #    theta_E=lens_model_samps[:,0],gamma=lens_model_samps[:,3],
+    #    e1=lens_model_samps[:,n_images],e2=lens_model_samps[:,5],
+    #    center_x=lens_model_samps[:,6],center_y=lens_model_samps[:,7])
 
-    # repeat gamma1, gamma2 for the 4-image dimension
-    gamma1_samps = np.repeat(lens_model_samps[:,1],4,axis=-1)
-    gamma2_samps = np.repeat(lens_model_samps[:,2],4,axis=-1)
+    # repeat gamma1, gamma2 for the image dimension
+    gamma1_samps = np.repeat(lens_model_samps[:,1],n_images,axis=-1)
+    gamma2_samps = np.repeat(lens_model_samps[:,2],n_images,axis=-1)
 
     # batched shear calculation
     # citation: https://github.com/lenstronomy/lenstronomy/blob/5144659b9b09e8e6937c845442fea52bd78181c3/lenstronomy/LensModel/Profiles/shear.py#L31
-    shear_lp_samps = (1 / 2.0 * (gamma1_samps * x_im * x_im + 2 * 
-        gamma2_samps * x_im * y_im - gamma1_samps * y_im * y_im))
+    #shear_lp_samps = (1 / 2.0 * (gamma1_samps * x_im * x_im + 2 * 
+    #    gamma2_samps * x_im * y_im - gamma1_samps * y_im * y_im))
 
     # add & return!
-    lp_samps = epl_lp_samps + shear_lp_samps
+    #lp_samps = epl_lp_samps + shear_lp_samps
     
     # need to add extra dim to x_src/y_src
     x_src = np.expand_dims(x_src_samps,axis=-1)
-    x_src = np.repeat(x_src,4,axis=-1)
+    x_src = np.repeat(x_src,n_images,axis=-1)
     y_src = np.expand_dims(y_src_samps,axis=-1)
-    y_src = np.repeat(y_src,4,axis=-1)
-    geometry_samps = ((x_im - x_src) ** 2 + (y_im - y_src) ** 2) / 2.0
+    y_src = np.repeat(y_src,n_images,axis=-1)
+    #geometry_samps = ((x_im - x_src) ** 2 + (y_im - y_src) ** 2) / 2.0
 
     # needs to have final shape: (n_samps,n_images)
-    return geometry_samps - lp_samps
+    return eplshear_fp(x_im,y_im,theta_E=lens_model_samps[:,0],
+        gamma1=gamma1_samps,gamma2=gamma2_samps,gamma=lens_model_samps[:,3],
+        e1=lens_model_samps[:,n_images],e2=lens_model_samps[:,5],
+        center_x=lens_model_samps[:,6],center_y=lens_model_samps[:,7],
+        src_x=x_src,src_y=y_src)
 
+def eplshear_fp(x_im, y_im, theta_E, gamma1, gamma2, gamma, e1, e2, 
+    center_x, center_y, src_x, src_y):
+    """
+    Computes PEMD+shear fermat potential at x_im,y_im with no batching overhead
+    """
 
+    # pemd lensing potential
+    lp = epl_lp(x_im, y_im, theta_E, gamma, e1, e2, center_x, center_y)
+
+    # add shear lensing potential
+    lp += (1 / 2.0 * (gamma1 * x_im * x_im + 2 * 
+        gamma2 * x_im * y_im - gamma1 * y_im * y_im))
+
+    # geometry term
+    geometry = ((x_im - src_x) ** 2 + (y_im - src_y) ** 2) / 2.0
+
+    # combine
+    return geometry - lp
 
 # HERE DOWN IS COPIED FROM LENSTRONOMY (B/C I NEED TO MAKE A CHANGE IDK HOW TO PUSH YET TO LENSTRONOMY)
 # SOURCE: https://github.com/lenstronomy/lenstronomy/blob/main/lenstronomy/LensModel/Profiles/epl_numba.py

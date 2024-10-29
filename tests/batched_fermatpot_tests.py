@@ -45,10 +45,6 @@ class BatchFermatPotTests(unittest.TestCase):
                     kwargs_lens_params
             )
 
-            while len(theta_x) < 4:
-                theta_x = np.append(theta_x,0.)
-                theta_y = np.append(theta_y,0.)
-
             print('im pos: ', theta_x)
 
             # compute fermat potentials from lenstronomy
