@@ -253,71 +253,7 @@ class LensSample:
             for j in range(0,len(fpd_list)):
                 column_name = 'fpd0'+str(j+1)
                 self.lens_df.at[r, column_name] = fpd_list[j]
-
-    def batched_fp_samples(self,lens_idx,n_samps=int(1e3),gamma_lens=False):
-        """
-        Args:
-            lens_idx (int): index in dataframe 
-            n_samps (int): # of samples
-            gamma_lens (bool): Default=False. If True, returns 
-                fpd_samps and gamma_lens_samps
-        Returns:
-            a list of fp samples size (n_samps,4)
-            (If gamma_lens = True, returns fpd_samps,gamma_lens_samps)
-        
-        """
-
-        x_im = self.lens_df.loc[lens_idx,['x_im0','x_im1','x_im2','x_im3']].to_numpy()
-        x_im = np.repeat(x_im[np.newaxis,:],n_samps, axis=0)
-        y_im = self.lens_df.loc[lens_idx,['y_im0','y_im1','y_im2','y_im3']].to_numpy()
-        y_im = np.repeat(y_im[np.newaxis,:],n_samps, axis=0)
-
-        # sample each of the lens parameters
-        theta_E_samps = norm.rvs(loc=self.lens_df.loc[lens_idx,'theta_E_pred'],
-            scale=self.lens_df.loc[lens_idx,'theta_E_stddev'],size=n_samps)
-        gamma_samps = norm.rvs(loc=self.lens_df.loc[lens_idx,'gamma_pred'],
-            scale=self.lens_df.loc[lens_idx,'gamma_stddev'],size=n_samps)
-        e1_samps = norm.rvs(loc=self.lens_df.loc[lens_idx,'e1_pred'],
-            scale=self.lens_df.loc[lens_idx,'e1_stddev'],size=n_samps)
-        e2_samps = norm.rvs(loc=self.lens_df.loc[lens_idx,'e2_pred'],
-            scale=self.lens_df.loc[lens_idx,'e2_stddev'],size=n_samps)
-        center_x_samps = norm.rvs(loc=self.lens_df.loc[lens_idx,'center_x_pred'],
-            scale=self.lens_df.loc[lens_idx,'center_x_stddev'],size=n_samps)
-        center_y_samps = norm.rvs(loc=self.lens_df.loc[lens_idx,'center_y_pred'],
-            scale=self.lens_df.loc[lens_idx,'center_y_stddev'],size=n_samps)
-        
-        gamma1_samps = norm.rvs(loc=self.lens_df.loc[lens_idx,'gamma1_pred'],
-            scale=self.lens_df.loc[lens_idx,'gamma1_stddev'],size=n_samps)
-        gamma2_samps = norm.rvs(loc=self.lens_df.loc[lens_idx,'gamma2_pred'],
-            scale=self.lens_df.loc[lens_idx,'gamma2_stddev'],size=n_samps)
-        
-        
-        # batched epl_numba calculation
-        # lp = lensing potential
-        epl_lp_samps = EPL_numba.function(x=x_im, y=y_im,
-            theta_E=theta_E_samps,gamma=gamma_samps,e1=e1_samps,e2=e2_samps,
-            center_x=center_x_samps,center_y=center_y_samps)
-
-        # batched shear calculation
-        # citation: https://github.com/lenstronomy/lenstronomy/blob/5144659b9b09e8e6937c845442fea52bd78181c3/lenstronomy/LensModel/Profiles/shear.py#L31
-        # TODO: do I need to repeat gamma1, gamma2 for the 4-image dimension?
-        shear_lp_samps = (1 / 2.0 * (gamma1_samps * x_im * x_im + 2 * 
-            gamma2_samps * x_im * y_im - gamma1_samps * y_im * y_im))
-
-        # add & return!
-        lp_samps = epl_lp_samps + shear_lp_samps
-        
-        # TODO: how to input the source position here? I currently have no requirement
-        # that the source pos. is consistent with the image positions...
-        # TODO: need to add extra dim to x_src/y_src?
-        x_src = norm.rvs(loc=self.lens_df.loc[lens_idx,'x_src_pred'],
-            scale=self.lens_df.loc[lens_idx,'x_src_stddev'],size=n_samps)
-        y_src = norm.rvs(loc=self.lens_df.loc[lens_idx,'y_src_pred'],
-            scale=self.lens_df.loc[lens_idx,'y_src_stddev'],size=n_samps)
-        geometry_samps = ((x_im - x_src) ** 2 + (y_im - y_src) ** 2) / 2.0
-
-        # needs to have final shape: (n_samps,n_images)
-        return geometry_samps - lp_samps
+      
 
     def pred_fpd_samples(self,lens_idx,n_samps=int(1e3),gamma_lens=False):
         """samples lens model params & computes fpd for each sample at the 
