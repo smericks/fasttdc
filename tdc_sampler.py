@@ -1,7 +1,8 @@
 import jax_cosmo
 import jax.numpy as jnp
 import numpy as np
-from scipy.stats import norm, uniform
+import pandas as pd
+from scipy.stats import norm, uniform, gaussian_kde
 from om10_lens_sample import OM10Sample
 import tdc_utils
 import emcee
@@ -87,24 +88,30 @@ def preprocess_td_measured(td_measured,td_cov,fpd_samples):
 # internally 
 class TDCLikelihood():
 
-    def __init__(self,td_measured,td_cov,z_lens,z_src,fpd_pred_samples,
-        gamma_pred_samples,cosmo_model='LCDM'):
+    def __init__(self,td_measured_padded,td_likelihood_prec,td_likelihood_prefactors,
+        fpd_samples_padded,gamma_pred_samples,z_lens,z_src,
+        log_prob_modeling_prior=None,cosmo_model='LCDM'):
         """
         Keep track of quantities that remain constant throughout the inference
 
         Args: 
-            td_measured (np.array(float), size:(n_lenses,3)): list of 1d arrays of 
-                time delay measurements for each lens
-            td_cov (np.array(float), size:(n_lenses,3,3)): list of 2d arrays of 
-                time delay covariance matrices, padded with Nans
+            td_measured_padded: array of td_measured, doubles padded w/ zeros 
+                (n_lenses,3)
+            td_likelihood_prec: array of precision matrices: 
+                - doubles: ((1/sigma^2 0 0 ),(0 0 0),(0 0 0 )
+                - quads: (1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2)
+            td_likelihood_prec:  array of log-space additive prefactors: 
+                log( (1/(2pi)^k/2) * 1/sqrt(det(Sigma)) )
+                - doubles: k=1,det(Sigma)=det([sigma^2])
+                - quads: k=3, det(Sigma)=det(Sigma)
+            fpd_samples_padded: array of fpd_samples, doubles padded w/ zeros
+                (n_lenses,n_fpd_samples,3)
+            gamma_pred_samples (np.array(float)): 
+                gamma samples associated with each set of fpd samples.
+                (n_lenses,n_samples)
             z_lens (np.array(float), size:(n_lenses)): lens redshifts
             z_src (np.array(float), size:(n_lenses)): source redshifts
-            fpd_ped_samples (list of [float]): list of !!variable size!! 2d arrays
-                of fpd samples. Some will have dim (1,n_samples), others will have dim
-                (3,n_samples)
-            gamma_pred_samples (np.array(float), size:(n_lenses,n_samples)): 
-                list of 1d arrays of list of gamma samples associated with each 
-                set of fpd samples.
+            log_prob_modeling_prior: TODO
             cosmo_model (string): 'LCDM' or 'w0waCDM'
         """
 
@@ -115,12 +122,7 @@ class TDCLikelihood():
         self.cosmo_model = cosmo_model
         # make sure the dims are right
         self.gamma_pred_samples = gamma_pred_samples
-        self.num_fpd_samples = len(fpd_pred_samples[0][0])
-
-        # padding
-        (td_measured_padded,fpd_samples_padded,td_likelihood_prefactors,
-            td_likelihood_prec) = preprocess_td_measured(td_measured,td_cov,
-            fpd_pred_samples)
+        self.num_fpd_samples = len(gamma_pred_samples[0])
         
         # keep track internally
         self.fpd_samples_padded = fpd_samples_padded
@@ -134,7 +136,15 @@ class TDCLikelihood():
 
 
         # TODO: fix hardcoding of this
-        self.log_prob_modeling_prior = norm.logpdf(gamma_pred_samples,loc=2.,scale=0.2)
+        if log_prob_modeling_prior is None:
+            self.log_prob_modeling_prior = norm.logpdf(gamma_pred_samples,loc=2.,scale=0.2)
+        else:
+            hst_train0 = pd.read_csv('/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/MassModels/hst_train0_metadata.csv')
+            gamma_vals = hst_train0['main_deflector_parameters_gamma'].to_numpy().astype(float)
+            gamma_kde = gaussian_kde(gamma_vals)
+            self.log_prob_modeling_prior = np.empty((gamma_pred_samples.shape))
+            for i in range(0,gamma_pred_samples.shape[0]):
+                self.log_prob_modeling_prior[i,:] = gamma_kde.logpdf(gamma_pred_samples[i])
 
     # compute predicted time delays from predicted fermat potential differences
     # requires an assumed cosmology (from hyperparameters) and redshifts
@@ -233,28 +243,16 @@ class TDCLikelihood():
 # Sampling Implementation
 #########################
 
-def fast_TDC(td_measured,td_cov,z_lens,z_src,
-    fpd_pred_samples,gamma_pred_samples,num_emcee_samps=1000,
-    cosmo_model='LCDM'):
+def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
+    n_walkers=20):
     """
     Args:
-        td_measured (np.array(float), size:(n_lenses,3)): list of 1d arrays of 
-            time delay measurements for each lens, doubles padded with Nans
-        td_cov (np.array(float), size:(n_lenses,3,3)): list of 2d arrays of 
-            time delay covariance matrices, doubles padded with Nans
-        z_lens (size:(n_lenses))
-        z_src (size:(n_lenses))
-        fpd_samples (list of [float,float]): list of !!variable size!! 2d arrays
-            of fpd samples. Some will have dim (1,n_samples), others will have dim
-            (3,n_samples)
-        gamma_pred_samples ( size:(n_lenses,num_fpd_samples))
-        num_emcee_samps (int): Number of iterations for MCMC inference
+        tdc_likelihood (TDCLikelihood object)
         cosmo_model (string): 'LCDM' or 'w0waCDM'
+        num_emcee_samps (int): Number of iterations for MCMC inference
+        n_walkers (int): Number of emcee walkers
         
     """
-
-    tdc_likelihood = TDCLikelihood(td_measured,td_cov,z_lens,z_src,
-        fpd_pred_samples,gamma_pred_samples,cosmo_model=cosmo_model)
 
     def LCDM_log_prior(hyperparameters):
         """
@@ -277,15 +275,20 @@ def fast_TDC(td_measured,td_cov,z_lens,z_src,
             hyperparameters ([H0,w0,wa,mu_gamma,sigma_gamma])
         """
 
-        if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+        # h0 [0,150]
+        if hyperparameters[0] < 0 or hyperparameters[0] > 150: 
                 return -np.inf
-        elif hyperparameters[0] < -11 or hyperparameters[0] > 9: #w0 (centered -1)
+        #w0 [-2,0]
+        elif hyperparameters[1] < -2 or hyperparameters[1] > 0:
                 return -np.inf
-        elif hyperparameters[0] < -10 or hyperparameters[0] > 10: #wa (centered 0)
+        #wa [-2,2]
+        elif hyperparameters[2] < -2 or hyperparameters[2] > 2:
                 return -np.inf
-        elif hyperparameters[1] < 1.5 or hyperparameters[1] > 2.5: #mu(gamma)
+        #mu(gamma)
+        elif hyperparameters[3] < 1.5 or hyperparameters[3] > 2.5:
             return -np.inf
-        elif hyperparameters[2] < 0.001 or hyperparameters[2] > 0.2: #sigma(gamma)
+        #sigma(gamma)
+        elif hyperparameters[4] < 0.001 or hyperparameters[4] > 0.2:
             return -np.inf
         
         return 0
@@ -309,8 +312,8 @@ def fast_TDC(td_measured,td_cov,z_lens,z_src,
             cur_state = np.empty((n_walkers,5))
             # fill h0 initial state
             cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers)
-            cur_state[:,1] = uniform.rvs(loc=-3,scale=4,size=n_walkers)
-            cur_state[:,2] = uniform.rvs(loc=-2,scale=4,size=n_walkers)
+            cur_state[:,1] = uniform.rvs(loc=-1.5,scale=1.,size=n_walkers)
+            cur_state[:,2] = uniform.rvs(loc=-1,scale=2,size=n_walkers)
             cur_state[:,3] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
             cur_state[:,4] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
 
@@ -330,19 +333,18 @@ def fast_TDC(td_measured,td_cov,z_lens,z_src,
             lp = w0waCDM_log_prior(hyperparameters)
         # Likelihood
         if lp == 0:
-            lp += tdc_likelihood.full_log_likelihood(hyperparameters)
+            fll = tdc_likelihood.full_log_likelihood(hyperparameters)
+            lp += fll
 
         return lp
     
-    # TODO: emcee stuff here
-    # 10 walkers, 3 dimensions
-    n_walkers = 10
-    sampler = emcee.EnsembleSampler(n_walkers,3,log_posterior)
+    # emcee stuff here
     cur_state = generate_initial_state(n_walkers,cosmo_model)
+    sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior)
 
     # run mcmc
     tik_mcmc = time.time()
-    _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps)
+    _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
     tok_mcmc = time.time()
     print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
 
