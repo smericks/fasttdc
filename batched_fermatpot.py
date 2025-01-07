@@ -29,6 +29,14 @@ def eplshear_fp_samples(x_im,y_im,lens_model_samps,x_src_samps,
     n_samps = np.shape(lens_model_samps)[0]
     n_images = np.shape(x_im)[0]
 
+    # TODO: check if x_im,y_im contain nans, nans will cause an infinite loop
+    if np.sum(np.isnan(x_im)) != 0:
+        print('x_im contains nans')
+        raise ValueError
+    elif np.sum(np.isnan(y_im)) != 0:
+        print('y_im contains nans')
+        raise ValueError
+
     # add batch dim to x_im,y_im
     x_im = np.repeat(x_im[np.newaxis,:],n_samps, axis=0)
     y_im = np.repeat(y_im[np.newaxis,:],n_samps, axis=0)
