@@ -3,7 +3,6 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 from scipy.stats import norm, uniform, gaussian_kde
-from om10_lens_sample import OM10Sample
 import tdc_utils
 import emcee
 import time
