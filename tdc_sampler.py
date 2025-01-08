@@ -99,7 +99,7 @@ class TDCLikelihood():
             td_likelihood_prec: array of precision matrices: 
                 - doubles: ((1/sigma^2 0 0 ),(0 0 0),(0 0 0 )
                 - quads: (1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2)
-            td_likelihood_prec:  array of log-space additive prefactors: 
+            td_likelihood_prefactors:  array of log-space additive prefactors: 
                 log( (1/(2pi)^k/2) * 1/sqrt(det(Sigma)) )
                 - doubles: k=1,det(Sigma)=det([sigma^2])
                 - quads: k=3, det(Sigma)=det(Sigma)
@@ -107,7 +107,7 @@ class TDCLikelihood():
                 (n_lenses,n_fpd_samples,3)
             gamma_pred_samples (np.array(float)): 
                 gamma samples associated with each set of fpd samples.
-                (n_lenses,n_samples)
+                (n_lenses,n_fpd_samples)
             z_lens (np.array(float), size:(n_lenses)): lens redshifts
             z_src (np.array(float), size:(n_lenses)): source redshifts
             log_prob_modeling_prior: TODO
