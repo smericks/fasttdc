@@ -73,7 +73,7 @@ def eplshear_fp_samples(x_im,y_im,lens_model_samps,x_src_samps,
     # needs to have final shape: (n_samps,n_images)
     return eplshear_fp(x_im,y_im,theta_E=lens_model_samps[:,0],
         gamma1=gamma1_samps,gamma2=gamma2_samps,gamma=lens_model_samps[:,3],
-        e1=lens_model_samps[:,n_images],e2=lens_model_samps[:,5],
+        e1=lens_model_samps[:,4],e2=lens_model_samps[:,5],
         center_x=lens_model_samps[:,6],center_y=lens_model_samps[:,7],
         src_x=x_src,src_y=y_src)
 
@@ -220,6 +220,7 @@ def omega(phi, t, q, niter_max=200, tol=1e-16):
     f = (1 - q) / (1 + q)
     omegas = np.zeros_like(phi, dtype=np.complex128)
     # NOTE: THIS IS WHERE THE CHANGE TO LENSTRONOMY OCCURS
+    # NOTE: if q=1., this breaks!!!
     if hasattr(f, "__len__"):
         niter = min(
             niter_max, int(np.max(np.log(tol) / np.log(f)))+2
