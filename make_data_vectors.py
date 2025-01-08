@@ -50,7 +50,8 @@ def make_data_vectors(lens_catalog,lens_indices,num_images,td_meas_error,
         measured_prec = np.zeros((size_subsamp,3,3))
         measured_prec[:,0,0] += 1/(td_meas_error**2)
         # 1d Gaussian multiplicative factor out front
-        prefactor = np.ones(size_subsamp)* (1/(2*np.pi))**(1/2) / td_meas_error
+        prefactor = np.log(np.ones(size_subsamp)* (1/(2*np.pi))**(1/2) / 
+            td_meas_error)
     elif num_images == 4:
         mus = lens_catalog.lens_df.loc[lens_indices,['td01','td02','td03']].to_numpy()
         for i in range(0,3):
@@ -59,12 +60,10 @@ def make_data_vectors(lens_catalog,lens_indices,num_images,td_meas_error,
         measured_prec = np.repeat(measured_prec[np.newaxis,:],size_subsamp, 
             axis=0)
         # 3d Gaussian multiplicative factor out front
-        prefactor = np.ones(size_subsamp)* (1/(2*np.pi))**(3/2) / (
-            np.sqrt(np.linalg.det(np.eye(3,3)*(td_meas_error**2))))
+        prefactor = np.log(np.ones(size_subsamp)* (1/(2*np.pi))**(3/2) / (
+            np.sqrt(np.linalg.det(np.eye(3,3)*(td_meas_error**2)))))
 
     # STEP 2: compute fpd samps, track gamma samps from npe posteriors
-    num_fpd_samps = 5000
-    # gold doubles
     fpd_samps = np.zeros((size_subsamp,num_fpd_samps,3)) # dbls padded w/ zeros
     gamma_samps = np.empty((size_subsamp,num_fpd_samps))
 
@@ -91,7 +90,7 @@ def make_data_vectors(lens_catalog,lens_indices,num_images,td_meas_error,
             x_im = lens_catalog.lens_df.loc[idx,
                 ['x_im0','x_im1','x_im2','x_im3']].to_numpy().astype(float)
             y_im = lens_catalog.lens_df.loc[idx,
-                ['x_im0','x_im1','x_im2','x_im3']].to_numpy().astype(float)
+                ['y_im0','y_im1','y_im2','y_im3']].to_numpy().astype(float)
             fermatpot_samps = batched_fermatpot.eplshear_fp_samples(x_im,y_im,
                 lens_param_samps[:,:8],lens_param_samps[:,8],
                 lens_param_samps[:,9])
