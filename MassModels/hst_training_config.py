@@ -15,16 +15,17 @@ kwargs_numerics = {'supersampling_factor':1}
 # size of cutout
 numpix = 165
 
-# quads_only
+# doubles & quads only
 doubles_quads_only = True
-# point source magnification cut
-#ps_magnification_cut = 2
+# don't count ps images less than 0.5 magnified (this is quite conservative, this allows images 
+# that are 2x de-magnified)
+magnification_limit = 0.5
 
 # load in a PSF kernel
 from astropy.io import fits
 from lenstronomy.Util import kernel_util
 
-psf_fits_file = '/home/users/sydney3/paltas/datasets/hst_psf/STDPBF_WFC3UV_F814W.fits'
+psf_fits_file = '/scratch/users/sydney3/forecast/paltas/datasets/hst_psf/STDPBF_WFC3UV_F814W.fits'
 #psf_fits_file = '/Users/smericks/Desktop/StrongLensing/paltas/datasets/hst_psf/STDPBF_WFC3UV_F814W.fits'
 
 # load in focus diverse PSF maps
