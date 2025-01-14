@@ -15,16 +15,17 @@ kwargs_numerics = {'supersampling_factor':1}
 # size of cutout
 numpix = 165
 
-# quads_only
+# doubles & quads only
 doubles_quads_only = True
-# point source magnification cut
-#ps_magnification_cut = 2
+# don't count ps images less than 0.5 magnified (this is quite conservative, this allows images 
+# that are 2x de-magnified)
+magnification_limit = 0.5
 
 # load in a PSF kernel
 from astropy.io import fits
 from lenstronomy.Util import kernel_util
 
-psf_fits_file = '/home/users/sydney3/paltas/datasets/hst_psf/STDPBF_WFC3UV_F814W.fits'
+psf_fits_file = '/scratch/users/sydney3/forecast/paltas/datasets/hst_psf/STDPBF_WFC3UV_F814W.fits'
 #psf_fits_file = '/Users/smericks/Desktop/StrongLensing/paltas/datasets/hst_psf/STDPBF_WFC3UV_F814W.fits'
 
 # load in focus diverse PSF maps
@@ -51,18 +52,17 @@ config_dict = {
 		'parameters':{
 			'z_lens': truncnorm(-2.5,np.inf,loc=0.5,scale=0.2).rvs,
 			'gamma': truncnorm(-(2./.2),np.inf,loc=2.0,scale=0.2).rvs,
-            'theta_E': truncnorm(-2./4.,np.inf,loc=0.6,scale=0.4).rvs,
-            'e1':norm(loc=0,scale=0.2).rvs,
-            'e2':norm(loc=0,scale=0.2).rvs,
-            # see cross_object below
+			'theta_E': truncnorm(-2./4.,np.inf,loc=0.6,scale=0.4).rvs,
+			'e1':norm(loc=0,scale=0.2).rvs,
+			'e2':norm(loc=0,scale=0.2).rvs,
+			# see cross_object below
 			'center_x':None,
 			'center_y':None,
 			'gamma1':norm(loc=0,scale=0.06).rvs,
-            'gamma2':norm(loc=0,scale=0.06).rvs,
+			'gamma2':norm(loc=0,scale=0.06).rvs,
 			'ra_0':0.0,
-			'dec_0':0.0,
-		}
-	},
+			'dec_0':0.0}
+    },
     'source':{
 		'class': SingleSersicSource,
 		'parameters':{
