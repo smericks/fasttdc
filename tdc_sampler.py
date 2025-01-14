@@ -7,77 +7,6 @@ import tdc_utils
 import emcee
 import time
 
-#################################
-# Preprocessing of TDC Quantities
-#################################
-
-def preprocess_td_measured(td_measured,td_cov,fpd_samples):
-    """ Takes in output from LensSample.tdc_sampler_input() and pre-processes
-        it for fast TDC inference
-
-    Constructs prefactors, 3d precision matrices, and 3d td_measured such that
-        double and quad likelihoods can be evaluated per lens at the same time.
-        For lenses with only one time delay, prefactors and "precision matrices" 
-        are constructed s.t. when they are used for 3D Gaussian evaluation, it 
-        is equivalent to evaluating a 1D Gaussian.
-
-    This means that empty values are padded with !!!zeros!!! 
-
-    Args:
-        td_measured (np.array(float), size:(n_lenses,3)): list of 1d arrays of 
-            time delay measurements for each lens
-        td_cov (np.array(float), size:(n_lenses,3,3)): list of 2d arrays of 
-            time delay covariance matrices, padded with Nans
-        fpd_samples (list of [float,float]): list of !!variable size!! 2d arrays
-            of fpd samples. Some will have dim (1,n_samples), others will have dim
-            (3,n_samples)
-
-    Returns:
-        array of td_measured_padded (n_lenses,3)
-        array of fpd_samples_padded (n_lenses,n_fpd_samples,3)
-        array of log-space additive prefactors: log( (1/(2pi)^k/2) * 1/sqrt(det(Sigma)) )
-            - doubles: k=1,det(Sigma)=det([sigma^2])
-            - quads: k=3, det(Sigma)=det(Sigma)
-        array of precision matrices: 
-            - doubles: ((1/sigma^2 0 0 ),(0 0 0),(0 0 0 )
-            - quads: (1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2)
-    """
-    
-    num_lenses = len(td_measured)
-    num_fpd_samples = len(fpd_samples[0][0])
-    # HARDCODED TO 3 (max we use are quads)
-    td_measured_padded = np.empty((num_lenses,3))
-    fpd_samples_padded = np.empty((num_lenses,num_fpd_samples,3))
-    td_likelihood_prefactors = np.empty((num_lenses))
-    td_likelihood_prec = np.empty((num_lenses,3,3))
-
-    # I'm not sure if I can use indexing for conditioning b/c of the variable length
-    for l in range(0,num_lenses):
-        num_td = len(fpd_samples[l])
-        # doubles
-        if num_td ==1:
-            td_measured_padded[l] = [td_measured[l][0],0,0]
-            td_likelihood_prec[l] = np.asarray([[1/td_cov[l][0][0],0,0],
-                [0,0,0],[0,0,0]])
-            fpd_samples_padded[l] = np.asarray([fpd_samples[l][0],
-                np.zeros((num_fpd_samples)),np.zeros((num_fpd_samples))]).T
-            # 1 / (sigma*sqrt(2pi))
-            td_likelihood_prefactors[l] = ((1/(2*np.pi))**(num_td/2) 
-                / np.sqrt(td_cov[l][0][0]))
-        # quads
-        elif num_td == 3:
-            td_measured_padded[l] = td_measured[l]
-            td_likelihood_prec[l] = np.linalg.inv(np.asarray(td_cov[l]))
-            fpd_samples_padded[l] = np.asarray(fpd_samples[l]).T
-            td_likelihood_prefactors[l] = ((1/(2*np.pi))**(num_td/2) 
-                / np.sqrt(np.linalg.det(td_cov[l])))
-        else:
-            print(("Number of time delays must be 1 or 3"+ 
-                "lens %d has %d time delays"%(l,len(td_measured[l]))))
-            raise ValueError
-        
-    return td_measured_padded, fpd_samples_padded, np.log(td_likelihood_prefactors), td_likelihood_prec
-
 
 ###########################
 # TDC Likelihood Functions
@@ -136,7 +65,8 @@ class TDCLikelihood():
 
         # TODO: fix hardcoding of this
         if log_prob_modeling_prior is None:
-            self.log_prob_modeling_prior = norm.logpdf(gamma_pred_samples,loc=2.,scale=0.2)
+            self.log_prob_modeling_prior = uniform.logpdf(gamma_pred_samples,loc=1.,scale=2.)
+            #self.log_prob_modeling_prior = norm.logpdf(gamma_pred_samples,loc=2.,scale=0.2)
         else:
             hst_train0 = pd.read_csv('/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/MassModels/hst_train0_metadata.csv')
             gamma_vals = hst_train0['main_deflector_parameters_gamma'].to_numpy().astype(float)
@@ -150,7 +80,9 @@ class TDCLikelihood():
     def td_pred_from_fpd_pred(self,hyperparameters):
         """
         Args:
-            hyperparameters ():
+            hyperparameters (): 
+                - LCDM order: [H0,Omega_M,mu_gamma,sigma_gamma]
+                - w0waCDM order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
             fpd_pred_samples (size:(n_lenses,n_samples,3)): Note: it is assumed
                 doubles are padded with zeros
 
@@ -160,15 +92,19 @@ class TDCLikelihood():
 
         # construct cosmology object from hyperparameters
         h0_input = hyperparameters[0]
+        omega_M_input = hyperparameters[1]
         if self.cosmo_model == 'LCDM':
              w0_input = -1.
              wa_input = 0.
         elif self.cosmo_model == 'w0waCDM':
-             w0_input = hyperparameters[1]
-             wa_input = hyperparameters[2]
+             w0_input = hyperparameters[2]
+             wa_input = hyperparameters[3]
+        # NOTE: baryonic fraction hardcoded to zero
         my_jax_cosmo = jax_cosmo.Cosmology(h=jnp.float32(h0_input/100),
-                    Omega_c=jnp.float32(0.3),
-                    Omega_k=jnp.float32(0.),Omega_b=jnp.float32(0.0), w0=jnp.float32(w0_input),
+                    Omega_c=jnp.float32(omega_M_input), # "cold dark matter fraction"
+                    Omega_b=jnp.float32(0.0), # "baryonic fraction"
+                    Omega_k=jnp.float32(0.),
+                    w0=jnp.float32(w0_input),
                     wa=jnp.float32(wa_input),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
         
         # compute time delay distances from cosmology and redshifts
@@ -203,7 +139,7 @@ class TDCLikelihood():
         # reduce to two dimensions: (n_lenses,n_fpd_samples)
         exponent = np.squeeze(exponent)
 
-        # TODO: should I change this to log-likelihood?
+        # log-likelihood
         return self.td_likelihood_prefactors + exponent
         
         
@@ -215,12 +151,13 @@ class TDCLikelihood():
                 that doubles are padded w/ zeros
         """
 
-        # TODO: construct td_pred_samples from fpd_pred_samples
+        # td_pred_samples from fpd_pred_samples
         td_pred_samples = self.td_pred_from_fpd_pred(hyperparameters)
 
         td_log_likelihoods = self.td_log_likelihood_per_samp(td_pred_samples)
 
         # reweighting factor
+        # NOTE: hardcoding of hyperparameter order!! (-2 is mu, -1 is sigma)
         eval_at_proposed_nu = norm.logpdf(self.gamma_pred_samples,
             loc=hyperparameters[-2],scale=hyperparameters[-1])
         rw_factor = eval_at_proposed_nu - self.log_prob_modeling_prior
@@ -256,14 +193,16 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
     def LCDM_log_prior(hyperparameters):
         """
         Args:
-            hyperparameters ([H0,mu_gamma,sigma_gamma])
+            hyperparameters ([H0,omega_M,mu_gamma,sigma_gamma])
         """
 
-        if hyperparameters[0] < 0 or hyperparameters[0] > 150:
-                return -np.inf
-        elif hyperparameters[1] < 1.5 or hyperparameters[1] > 2.5:
+        if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
             return -np.inf
-        elif hyperparameters[2] < 0.001 or hyperparameters[2] > 0.2:
+        if hyperparameters[1] < 0.05 or hyperparameters[1] > 5.: #omega_M 
+            return -np.inf
+        elif hyperparameters[2] < 1.5 or hyperparameters[2] > 2.5: #mu(gamma_lens)
+            return -np.inf
+        elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.2: #sigma(gamma_lens)
             return -np.inf
         
         return 0
@@ -271,23 +210,26 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
     def w0waCDM_log_prior(hyperparameters):
         """
         Args:
-            hyperparameters ([H0,w0,wa,mu_gamma,sigma_gamma])
+            hyperparameters ([H0,Omega_M,w0,wa,mu_gamma,sigma_gamma])
         """
 
         # h0 [0,150]
         if hyperparameters[0] < 0 or hyperparameters[0] > 150: 
-                return -np.inf
+            return -np.inf
+        # Omega_M [0.05,5.]
+        if hyperparameters[1] < 0.05 or hyperparameters[1] > 5.: 
+            return -np.inf
         #w0 [-2,0]
-        elif hyperparameters[1] < -2 or hyperparameters[1] > 0:
-                return -np.inf
+        elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
+            return -np.inf
         #wa [-2,2]
-        elif hyperparameters[2] < -2 or hyperparameters[2] > 2:
-                return -np.inf
+        elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
+            return -np.inf
         #mu(gamma)
-        elif hyperparameters[3] < 1.5 or hyperparameters[3] > 2.5:
+        elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5:
             return -np.inf
         #sigma(gamma)
-        elif hyperparameters[4] < 0.001 or hyperparameters[4] > 0.2:
+        elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2:
             return -np.inf
         
         return 0
@@ -295,26 +237,29 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
     def generate_initial_state(n_walkers,cosmo_model):
         """
         Args:
-            cosmo_model (string)
+            n_walkers (int): number of emcee walkers
+            cosmo_model (string): 'LCDM' or 'w0waCDM'
         """
 
         if cosmo_model == 'LCDM':
-            cur_state = np.empty((n_walkers,3))
-            # fill h0 initial state
-            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers)
-            cur_state[:,1] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
-            cur_state[:,2] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+            # order: [H0,Omega_M,mu_gamma,sigma_gamma]
+            cur_state = np.empty((n_walkers,4))
+            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
+            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.9,size=n_walkers) #Omega_M
+            cur_state[:,2] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
+            cur_state[:,3] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
 
             return cur_state
         
         elif cosmo_model == 'w0waCDM':
-            cur_state = np.empty((n_walkers,5))
-            # fill h0 initial state
-            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers)
-            cur_state[:,1] = uniform.rvs(loc=-1.5,scale=1.,size=n_walkers)
-            cur_state[:,2] = uniform.rvs(loc=-1,scale=2,size=n_walkers)
-            cur_state[:,3] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
-            cur_state[:,4] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+            # order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
+            cur_state = np.empty((n_walkers,6))
+            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
+            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.9,size=n_walkers) #Omega_M
+            cur_state[:,2] = uniform.rvs(loc=-1.5,scale=1.,size=n_walkers)
+            cur_state[:,3] = uniform.rvs(loc=-1,scale=2,size=n_walkers)
+            cur_state[:,4] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
+            cur_state[:,5] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
 
             return cur_state
 
@@ -323,8 +268,11 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
     def log_posterior(hyperparameters):
         """
         Args:
-            hyperparameters ([H0,mu_gamma,sigma_gamma] or [H0,w0,wa,mu_gamma,sigma_gamma])
+            hyperparameters ([float]): 
+                - LCDM: [H0,Omega_M,mu_gamma,sigma_gamma] 
+                - w0waCDM: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
         """
+        print('hyperparameters: ', hyperparameters)
         # Prior
         if cosmo_model == 'LCDM':
             lp = LCDM_log_prior(hyperparameters)
@@ -333,7 +281,12 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
         # Likelihood
         if lp == 0:
             fll = tdc_likelihood.full_log_likelihood(hyperparameters)
+            print('fll: ', fll)
             lp += fll
+            print('lp: ', lp)
+
+        else:
+            print('nonzero log prior: ', lp)
 
         return lp
     
