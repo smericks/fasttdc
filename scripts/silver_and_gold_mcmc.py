@@ -22,7 +22,7 @@ inputs_dict = {
 }
 
 input_keys = ['measured_td','measured_prec','prefactor','fpd_samps',
-    'gamma_samps','z_lens_truth','z_src_truth']
+    'lens_param_samps','z_lens_truth','z_src_truth']
 
 for l in lens_types:
     my_filepath = (exp_folder+'/'+l+'.h5')
@@ -60,10 +60,10 @@ silver_fpd_samps = np.vstack((
     inputs_dict['silver_dbls']['fpd_samps']
 ))
 silver_gamma_samps = np.vstack((
-    inputs_dict['gold_quads']['gamma_samps'],
-    inputs_dict['gold_dbls']['gamma_samps'],
-    inputs_dict['silver_quads']['gamma_samps'],
-    inputs_dict['silver_dbls']['gamma_samps']
+    inputs_dict['gold_quads']['lens_param_samps'][:,:,3],
+    inputs_dict['gold_dbls']['lens_param_samps'][:,:,3],
+    inputs_dict['silver_quads']['lens_param_samps'][:,:,3],
+    inputs_dict['silver_dbls']['lens_param_samps'][:,:,3]
 ))
 gold_z_lens = np.append(
     inputs_dict['gold_quads']['z_lens_truth'],

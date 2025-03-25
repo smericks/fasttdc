@@ -20,7 +20,7 @@ inputs_dict = {
 }
 
 input_keys = ['measured_td','measured_prec','prefactor','fpd_samps',
-    'gamma_samps','z_lens_truth','z_src_truth']
+    'lens_param_samps','z_lens_truth','z_src_truth']
 
 for l in lens_types:
     my_filepath = (exp_folder+'/'+l+'.h5')
@@ -38,7 +38,7 @@ my_tdc_w0waCDM = TDCLikelihood(
     inputs_dict['silver_dbls']['measured_prec'],
     inputs_dict['silver_dbls']['prefactor'],
     inputs_dict['silver_dbls']['fpd_samps'],
-    inputs_dict['silver_dbls']['gamma_samps'],
+    inputs_dict['silver_dbls']['lens_param_samps'][:,:,3],
     inputs_dict['silver_dbls']['z_lens_truth'],
     inputs_dict['silver_dbls']['z_src_truth'],
     cosmo_model='w0waCDM',
@@ -66,7 +66,7 @@ my_tdc_w0waCDM = TDCLikelihood(
     inputs_dict['silver_dbls']['measured_prec'][good_idx],
     inputs_dict['silver_dbls']['prefactor'][good_idx],
     inputs_dict['silver_dbls']['fpd_samps'][good_idx],
-    inputs_dict['silver_dbls']['gamma_samps'][good_idx],
+    inputs_dict['silver_dbls']['lens_param_samps'][good_idx,:,3],
     inputs_dict['silver_dbls']['z_lens_truth'][good_idx],
     inputs_dict['silver_dbls']['z_src_truth'][good_idx],
     cosmo_model='w0waCDM',

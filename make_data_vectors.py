@@ -30,7 +30,7 @@ def make_data_vectors(lens_catalog,lens_indices,num_images,td_meas_error,
     Returns:
         saves data vectors to a .h5 file. Saves objects with names: 
             ['measured_td','measured_prec','prefactor','fpd_samps',
-            'gamma_samps','z_lens','z_src']
+            'lens_param_samps','z_lens','z_src']
     """
 
     if num_images not in [2,4]:
@@ -65,10 +65,10 @@ def make_data_vectors(lens_catalog,lens_indices,num_images,td_meas_error,
 
     # STEP 2: compute fpd samps, track gamma samps from npe posteriors
     if emulated:
-        fpd_samps,gamma_samps = emulated_fpd_gamma_samples(size_subsamp,
+        fpd_samps,lp_samps = emulated_fpd_gamma_samples(size_subsamp,
             num_fpd_samps,num_images,lens_indices,lens_catalog,npe_mu,npe_cov)
     else:
-        fpd_samps, gamma_samps = fpd_gamma_samples(size_subsamp,num_fpd_samps,
+        fpd_samps, lp_samps = fpd_gamma_samples(size_subsamp,num_fpd_samps,
             num_images,lens_indices,lens_catalog,npe_mu,npe_cov)
 
     # let's dump everything into a .h5 file
@@ -78,7 +78,7 @@ def make_data_vectors(lens_catalog,lens_indices,num_images,td_meas_error,
     h5f.create_dataset('measured_prec',data=measured_prec)
     h5f.create_dataset('prefactor',data=prefactor)
     h5f.create_dataset('fpd_samps',data=fpd_samps)
-    h5f.create_dataset('gamma_samps',data=gamma_samps)
+    h5f.create_dataset('lens_param_samps',data=lp_samps)
 
     # add in ground truth info from lens_catalog (including redshifts)
     for key in lens_catalog.lens_df.keys():
@@ -92,9 +92,13 @@ def fpd_gamma_samples(size_subsamp,num_fpd_samps,num_images,lens_indices,lens_ca
     npe_mu,npe_cov):
     """
     Args:
+
+    Returns:
+        fpd_samps (size_subsamp,num_fpd_samps,3), 
+        lens_param_samps (size_subsamp,num_fpd_samps,np.shape(npe_mu)[-1])
     """
     fpd_samps = np.zeros((size_subsamp,num_fpd_samps,3)) # dbls padded w/ zeros
-    gamma_samps = np.empty((size_subsamp,num_fpd_samps))
+    lp_samps = np.empty((size_subsamp,num_fpd_samps,np.shape(npe_mu)[-1]))
 
     if num_images==2:
         for i in range(0,size_subsamp):
@@ -109,7 +113,7 @@ def fpd_gamma_samples(size_subsamp,num_fpd_samps,num_images,lens_indices,lens_ca
                 lens_param_samps[:,:8],lens_param_samps[:,8],
                 lens_param_samps[:,9])
             fpd_samps[i,:,0] = fermatpot_samps[:,0] - fermatpot_samps[:,1]
-            gamma_samps[i,:] = lens_param_samps[:,3]
+            lp_samps[i] = lens_param_samps
 
     elif num_images==4:
         for i in range(0,size_subsamp):
@@ -126,9 +130,9 @@ def fpd_gamma_samples(size_subsamp,num_fpd_samps,num_images,lens_indices,lens_ca
             fpd_samps[i,:,0] = fermatpot_samps[:,0] - fermatpot_samps[:,1]
             fpd_samps[i,:,1] = fermatpot_samps[:,0] - fermatpot_samps[:,2]
             fpd_samps[i,:,2] = fermatpot_samps[:,0] - fermatpot_samps[:,3]
-            gamma_samps[i,:] = lens_param_samps[:,3]
+            lp_samps[i] = lens_param_samps
 
-    return fpd_samps, gamma_samps 
+    return fpd_samps, lp_samps
 
 
 def emulated_fpd_gamma_samples(size_subsamp,num_fpd_samps,num_images,lens_indices,lens_catalog,
@@ -137,14 +141,14 @@ def emulated_fpd_gamma_samples(size_subsamp,num_fpd_samps,num_images,lens_indice
     Args:
     """
     fpd_samps = np.zeros((size_subsamp,num_fpd_samps,3)) # dbls padded w/ zeros
-    gamma_samps = np.empty((size_subsamp,num_fpd_samps))
+    lp_samps = np.empty((size_subsamp,num_fpd_samps,np.shape(npe_mu)[-1]))
 
     if num_images==2:
         for i in range(0,size_subsamp):
             idx = lens_indices[i]
             lens_param_samps = multivariate_normal.rvs(mean=npe_mu[idx],
                 cov=npe_cov[idx],size=num_fpd_samps)
-            gamma_samps[i,:] = lens_param_samps[:,3]
+            lp_samps[i] = lens_param_samps
 
             fpd01_truth = lens_catalog.lens_df.loc[idx,
                 ['fpd01']]
@@ -158,7 +162,7 @@ def emulated_fpd_gamma_samples(size_subsamp,num_fpd_samps,num_images,lens_indice
             idx = lens_indices[i]
             lens_param_samps = multivariate_normal.rvs(mean=npe_mu[idx],
                 cov=npe_cov[idx],size=num_fpd_samps)
-            gamma_samps[i,:] = lens_param_samps[:,3]
+            lp_samps[i] = lens_param_samps
 
             for j in range(0,3):
                 fpd0j_truth = lens_catalog.lens_df.loc[idx,
@@ -169,4 +173,4 @@ def emulated_fpd_gamma_samples(size_subsamp,num_fpd_samps,num_images,lens_indice
                 fpd_samps[i,:,j] = fermatpot_samps
 
 
-    return fpd_samps, gamma_samps 
+    return fpd_samps, lp_samps

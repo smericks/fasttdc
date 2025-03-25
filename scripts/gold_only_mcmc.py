@@ -8,10 +8,10 @@ sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/'
 from tdc_sampler import TDCLikelihood,fast_TDC
 
 # inference configurations
-num_emcee_samps = 5000
+num_emcee_samps = 100
 # where data vectors are stored
 exp_folder = ('/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/'+
-        'DataVectors/fpd_eval_DV_silverALLDEBIASED')
+        'DataVectors/src_mag_cut_silver_debiased')
 
 lens_types = ['gold_quads','gold_dbls']
 
@@ -21,7 +21,7 @@ inputs_dict = {
 }
 
 input_keys = ['measured_td','measured_prec','prefactor','fpd_samps',
-    'gamma_samps','z_lens_truth','z_src_truth']
+    'lens_param_samps','z_lens_truth','z_src_truth']
 
 for l in lens_types:
     my_filepath = (exp_folder+'/'+l+'.h5')
@@ -47,9 +47,12 @@ gold_fpd_samps = np.vstack((
     inputs_dict['gold_quads']['fpd_samps'],
     inputs_dict['gold_dbls']['fpd_samps']
 ))
+
+print(np.shape(inputs_dict['gold_quads']['lens_param_samps']))
+
 gold_gamma_samps = np.vstack((
-    inputs_dict['gold_quads']['gamma_samps'],
-    inputs_dict['gold_dbls']['gamma_samps']
+    inputs_dict['gold_quads']['lens_param_samps'][:,:,3],
+    inputs_dict['gold_dbls']['lens_param_samps'][:,:,3]
 ))
 gold_z_lens = np.append(
     inputs_dict['gold_quads']['z_lens_truth'],
