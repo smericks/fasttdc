@@ -16,10 +16,10 @@ kwargs_numerics = {'supersampling_factor':1}
 numpix = 165
 
 # doubles & quads only
-#doubles_quads_only = True
+doubles_quads_only = True
 # don't count ps images less than 0.5 magnified (this is quite conservative, this allows images 
 # that are 2x de-magnified)
-#magnification_limit = 0.5
+magnification_limit = 0.5
 
 # load in a PSF kernel
 from astropy.io import fits

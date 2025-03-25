@@ -17,9 +17,9 @@ kwargs_numerics = {'supersampling_factor':1}
 numpix = 33
 
 # quads_only
-#doubles_quads_only = True
+doubles_quads_only = True
 # point source magnification cut
-#magnification_limit = 0.5
+magnification_limit = 0.5
 #ps_magnification_cut = 2
 
 #psf_kernels = np.load('/home/users/sydney3/forecast/lsst_psf_library.npy')
