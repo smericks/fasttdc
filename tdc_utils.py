@@ -98,6 +98,25 @@ def td_from_ddt_fpd(Ddt,delta_phi):
 
     return delta_t_sec/(24*60*60) #24hrs, 60mins, 60sec
 
+def ddt_from_td_fpd(td,delta_phi):
+    """
+    Args:
+        time delay (float): in days 
+        delta_phi (float): fermat potential difference in arcsec^2
+
+    Returns:
+        Ddt (float): time delay distance in Mpc
+    """
+
+    delta_phi_rad = delta_phi*arcsec_in_rad**2 # arcsec^2 to radian^2
+    delta_t_sec = td*(24*60*60) # days to seconds
+
+    Ddt_km = delta_t_sec*C_kmpersec/delta_phi_rad
+ 
+    Ddt = Ddt_km/Mpc_in_km # km to Mpc
+
+    return Ddt
+
 
 def td_log_likelihood(td_measured,td_cov,td_pred):
     """Helper function for time delay cosmography

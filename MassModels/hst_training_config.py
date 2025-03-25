@@ -16,17 +16,17 @@ kwargs_numerics = {'supersampling_factor':1}
 numpix = 165
 
 # doubles & quads only
-doubles_quads_only = True
+#doubles_quads_only = True
 # don't count ps images less than 0.5 magnified (this is quite conservative, this allows images 
 # that are 2x de-magnified)
-magnification_limit = 0.5
+#magnification_limit = 0.5
 
 # load in a PSF kernel
 from astropy.io import fits
 from lenstronomy.Util import kernel_util
 
-psf_fits_file = '/scratch/users/sydney3/forecast/paltas/datasets/hst_psf/STDPBF_WFC3UV_F814W.fits'
-#psf_fits_file = '/Users/smericks/Desktop/StrongLensing/paltas/datasets/hst_psf/STDPBF_WFC3UV_F814W.fits'
+#psf_fits_file = '/scratch/users/sydney3/forecast/paltas/datasets/hst_psf/STDPBF_WFC3UV_F814W.fits'
+psf_fits_file = '/Users/smericks/Desktop/StrongLensing/paltas/datasets/hst_psf/STDPBF_WFC3UV_F814W.fits'
 
 # load in focus diverse PSF maps
 with fits.open(psf_fits_file) as hdu:
@@ -105,6 +105,14 @@ config_dict = {
 			'output_ab_zeropoint':output_ab_zeropoint,
 			'mag_pert': dist.MultipleValues(dist=truncnorm(-1/0.3,np.inf,1,0.3).rvs,num=10),
             'compute_time_delays':False
+		}
+	},
+    'lens_equation_solver':{
+		'parameters':{
+			'min_distance':0.04,
+			'search_window':165*0.04,
+			'num_iter_max':100,
+			'precision_limit':10**(-10)
 		}
 	},
     'cosmology':{

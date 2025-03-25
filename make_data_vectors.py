@@ -4,7 +4,7 @@ import numpy as np
 import batched_fermatpot
 
 def make_data_vectors(lens_catalog,lens_indices,num_images,td_meas_error,
-        npe_mu,npe_cov,h5_save_path,num_fpd_samps=1000):
+        npe_mu,npe_cov,h5_save_path,num_fpd_samps=1000,emulated=False):
     """
     Args:
         lens_catalog (lens_catalog.LensCatalog object): contains ground truth
@@ -64,6 +64,35 @@ def make_data_vectors(lens_catalog,lens_indices,num_images,td_meas_error,
             np.sqrt(np.linalg.det(np.eye(3,3)*(td_meas_error**2)))))
 
     # STEP 2: compute fpd samps, track gamma samps from npe posteriors
+    if emulated:
+        fpd_samps,gamma_samps = emulated_fpd_gamma_samples(size_subsamp,
+            num_fpd_samps,num_images,lens_indices,lens_catalog,npe_mu,npe_cov)
+    else:
+        fpd_samps, gamma_samps = fpd_gamma_samples(size_subsamp,num_fpd_samps,
+            num_images,lens_indices,lens_catalog,npe_mu,npe_cov)
+
+    # let's dump everything into a .h5 file
+
+    h5f = h5py.File(h5_save_path, 'w')
+    h5f.create_dataset('measured_td', data=measured_td)
+    h5f.create_dataset('measured_prec',data=measured_prec)
+    h5f.create_dataset('prefactor',data=prefactor)
+    h5f.create_dataset('fpd_samps',data=fpd_samps)
+    h5f.create_dataset('gamma_samps',data=gamma_samps)
+
+    # add in ground truth info from lens_catalog (including redshifts)
+    for key in lens_catalog.lens_df.keys():
+        h5f.create_dataset(key+'_truth',data=lens_catalog.lens_df.loc[lens_indices,
+            key].to_numpy().astype(float))
+    h5f.close()
+
+
+
+def fpd_gamma_samples(size_subsamp,num_fpd_samps,num_images,lens_indices,lens_catalog,
+    npe_mu,npe_cov):
+    """
+    Args:
+    """
     fpd_samps = np.zeros((size_subsamp,num_fpd_samps,3)) # dbls padded w/ zeros
     gamma_samps = np.empty((size_subsamp,num_fpd_samps))
 
@@ -99,16 +128,45 @@ def make_data_vectors(lens_catalog,lens_indices,num_images,td_meas_error,
             fpd_samps[i,:,2] = fermatpot_samps[:,0] - fermatpot_samps[:,3]
             gamma_samps[i,:] = lens_param_samps[:,3]
 
-    # let's dump everything into a .h5 file
+    return fpd_samps, gamma_samps 
 
-    h5f = h5py.File(h5_save_path, 'w')
-    h5f.create_dataset('measured_td', data=measured_td)
-    h5f.create_dataset('measured_prec',data=measured_prec)
-    h5f.create_dataset('prefactor',data=prefactor)
-    h5f.create_dataset('fpd_samps',data=fpd_samps)
-    h5f.create_dataset('gamma_samps',data=gamma_samps)
-    h5f.create_dataset('z_lens',data=lens_catalog.lens_df.loc[lens_indices,
-        'z_lens'].to_numpy().astype(float))
-    h5f.create_dataset('z_src',data=lens_catalog.lens_df.loc[lens_indices,
-        'z_src'].to_numpy().astype(float))
-    h5f.close()
+
+def emulated_fpd_gamma_samples(size_subsamp,num_fpd_samps,num_images,lens_indices,lens_catalog,
+    npe_mu,npe_cov):
+    """
+    Args:
+    """
+    fpd_samps = np.zeros((size_subsamp,num_fpd_samps,3)) # dbls padded w/ zeros
+    gamma_samps = np.empty((size_subsamp,num_fpd_samps))
+
+    if num_images==2:
+        for i in range(0,size_subsamp):
+            idx = lens_indices[i]
+            lens_param_samps = multivariate_normal.rvs(mean=npe_mu[idx],
+                cov=npe_cov[idx],size=num_fpd_samps)
+            gamma_samps[i,:] = lens_param_samps[:,3]
+
+            fpd01_truth = lens_catalog.lens_df.loc[idx,
+                ['fpd01']]
+            # random 5% error
+            fermatpot_samps = norm.rvs(loc=fpd01_truth,
+                scale=0.05*(np.abs(fpd01_truth)),size=num_fpd_samps)
+            fpd_samps[i,:,0] = fermatpot_samps
+
+    elif num_images==4:
+        for i in range(0,size_subsamp):
+            idx = lens_indices[i]
+            lens_param_samps = multivariate_normal.rvs(mean=npe_mu[idx],
+                cov=npe_cov[idx],size=num_fpd_samps)
+            gamma_samps[i,:] = lens_param_samps[:,3]
+
+            for j in range(0,3):
+                fpd0j_truth = lens_catalog.lens_df.loc[idx,
+                ['fpd0%d'%(j+1)]]
+                # random 5% error
+                fermatpot_samps = norm.rvs(loc=fpd0j_truth,
+                scale=0.05*(np.abs(fpd0j_truth)),size=num_fpd_samps)
+                fpd_samps[i,:,j] = fermatpot_samps
+
+
+    return fpd_samps, gamma_samps 

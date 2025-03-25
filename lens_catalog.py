@@ -117,12 +117,17 @@ class LensCatalog:
 
         # find the doubles, find the quads, run eplshear_fp_samples twice
         im3 = self.lens_df.loc[:,'x_im3'].to_numpy().astype(float)
-        self.dbls_idxs = np.where(np.isnan(im3))[0]
+        im2 = self.lens_df.loc[:,'x_im2'].to_numpy().astype(float)
+        self.dbls_idxs = np.where(np.isnan(im3) & np.isnan(im2))[0]
+        self.triples_idxs = np.where(np.isnan(im3) & ~np.isnan(im2))[0]
         self.quads_idxs = np.where(~np.isnan(im3))[0]
 
     def doubles_indices(self):
         return self.dbls_idxs
     
+    def triples_indices(self):
+        return self.triples_idxs
+
     def quads_indices(self):
         return self.quads_idxs
 
@@ -232,6 +237,9 @@ class OM10LensCatalog(LensCatalog):
         df = pd.read_csv(metadata_path)
         for i in range(0,len(metadata_params)):
             self.lens_df[self.lens_params[i]] = df[metadata_params[i]]
+
+        # track other params as well
+        self.lens_df['src_mag_app'] = df['source_parameters_mag_app']
 
         # redshifts!
         self.lens_df['z_lens'] = df['main_deflector_parameters_z_lens']

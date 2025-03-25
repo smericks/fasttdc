@@ -17,12 +17,13 @@ kwargs_numerics = {'supersampling_factor':1}
 numpix = 33
 
 # quads_only
-doubles_quads_only = True
+#doubles_quads_only = True
 # point source magnification cut
+#magnification_limit = 0.5
 #ps_magnification_cut = 2
 
-psf_kernels = np.load('/home/users/sydney3/forecast/lsst_psf_library.npy')
-# psf_kernels = np.load('/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/MassModels/lsst_psf_library.npy')
+#psf_kernels = np.load('/home/users/sydney3/forecast/lsst_psf_library.npy')
+psf_kernels = np.load('/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/MassModels/lsst_psf_library.npy')
 def draw_psf_kernel():
 	random_psf_index = np.random.randint(psf_kernels.shape[0])
 	chosen_psf = psf_kernels[random_psf_index, :, :]
@@ -90,6 +91,14 @@ config_dict = {
 			'output_ab_zeropoint':output_ab_zeropoint,
 			'mag_pert': dist.MultipleValues(dist=truncnorm(-1/0.3,np.inf,1,0.3).rvs,num=10),
             'compute_time_delays':False
+		}
+	},
+	'lens_equation_solver':{
+		'parameters':{
+			'min_distance':0.04,
+			'search_window':165*0.04,
+			'num_iter_max':100,
+			'precision_limit':10**(-10)
 		}
 	},
     'cosmology':{

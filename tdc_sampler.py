@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 from scipy.stats import norm, uniform, gaussian_kde
+from astropy.cosmology import w0waCDM
 import tdc_utils
 import emcee
 import time
@@ -18,7 +19,8 @@ class TDCLikelihood():
 
     def __init__(self,td_measured_padded,td_likelihood_prec,td_likelihood_prefactors,
         fpd_samples_padded,gamma_pred_samples,z_lens,z_src,
-        log_prob_modeling_prior=None,cosmo_model='LCDM'):
+        log_prob_modeling_prior=None,cosmo_model='LCDM',
+        use_gamma_info=True,use_astropy=False):
         """
         Keep track of quantities that remain constant throughout the inference
 
@@ -41,6 +43,9 @@ class TDCLikelihood():
             z_src (np.array(float), size:(n_lenses)): source redshifts
             log_prob_modeling_prior: TODO
             cosmo_model (string): 'LCDM' or 'w0waCDM'
+            use_gamma_info (bool): If False, removes reweighting from likelihood
+                evaluation (any population level gamma params should just 
+                return the prior then...)
         """
 
         # no processing needed (np.squeeze ensures any dimensions of size 1
@@ -48,6 +53,8 @@ class TDCLikelihood():
         self.z_lens = np.squeeze(np.asarray(z_lens))
         self.z_src = np.squeeze(np.asarray(z_src))
         self.cosmo_model = cosmo_model
+        self.use_gamma_info = use_gamma_info
+        self.use_astropy = use_astropy
         # make sure the dims are right
         self.gamma_pred_samples = gamma_pred_samples
         self.num_fpd_samples = len(gamma_pred_samples[0])
@@ -92,25 +99,41 @@ class TDCLikelihood():
 
         # construct cosmology object from hyperparameters
         h0_input = hyperparameters[0]
-        omega_M_input = hyperparameters[1]
+        # NOTE: baryonic fraction hardcoded to 0.05
+        omega_m_input = hyperparameters[1]
+        omega_c_input = hyperparameters[1] - 0.05 # CDM fraction
+        omega_de_input = 1. - omega_m_input
         if self.cosmo_model == 'LCDM':
              w0_input = -1.
              wa_input = 0.
         elif self.cosmo_model == 'w0waCDM':
              w0_input = hyperparameters[2]
              wa_input = hyperparameters[3]
-        # NOTE: baryonic fraction hardcoded to zero
-        my_jax_cosmo = jax_cosmo.Cosmology(h=jnp.float32(h0_input/100),
-                    Omega_c=jnp.float32(omega_M_input), # "cold dark matter fraction"
-                    Omega_b=jnp.float32(0.0), # "baryonic fraction"
-                    Omega_k=jnp.float32(0.),
-                    w0=jnp.float32(w0_input),
-                    wa=jnp.float32(wa_input),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
-        
-        # compute time delay distances from cosmology and redshifts
-        Ddt_computed = tdc_utils.jax_ddt_from_redshifts(my_jax_cosmo,self.z_lens,self.z_src)
-        # convert to numpy
-        Ddt_computed = np.array(Ddt_computed)
+
+        if self.use_astropy: 
+            # instantiate astropy cosmology object
+            astropy_cosmo = w0waCDM(H0=h0_input,
+                Om0=omega_m_input,Ode0=omega_de_input,
+                w0=w0_input,wa=wa_input)
+            # do stuff
+            Ddt_computed = tdc_utils.ddt_from_redshifts(astropy_cosmo,
+                self.z_lens,self.z_src)
+            # TODO: convert from astropy quantity to numpy
+            Ddt_computed = np.array(Ddt_computed)
+
+        else:
+            # NOTE: baryonic fraction hardcoded to 0.05
+            my_jax_cosmo = jax_cosmo.Cosmology(h=jnp.float32(h0_input/100),
+                        Omega_c=jnp.float32(omega_c_input), # "cold dark matter fraction"
+                        Omega_b=jnp.float32(0.05), # "baryonic fraction"
+                        Omega_k=jnp.float32(0.),
+                        w0=jnp.float32(w0_input),
+                        wa=jnp.float32(wa_input),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
+            
+            # compute time delay distances from cosmology and redshifts
+            Ddt_computed = tdc_utils.jax_ddt_from_redshifts(my_jax_cosmo,self.z_lens,self.z_src)
+            # convert to numpy
+            Ddt_computed = np.array(Ddt_computed)
         # add batch dimensions for Ddt computed...
         Ddt_repeated = np.repeat(Ddt_computed[:, np.newaxis],
             self.num_fpd_samples, axis=1)
@@ -158,9 +181,12 @@ class TDCLikelihood():
 
         # reweighting factor
         # NOTE: hardcoding of hyperparameter order!! (-2 is mu, -1 is sigma)
-        eval_at_proposed_nu = norm.logpdf(self.gamma_pred_samples,
-            loc=hyperparameters[-2],scale=hyperparameters[-1])
-        rw_factor = eval_at_proposed_nu - self.log_prob_modeling_prior
+        if self.use_gamma_info:
+            eval_at_proposed_nu = norm.logpdf(self.gamma_pred_samples,
+                loc=hyperparameters[-2],scale=hyperparameters[-1])
+            rw_factor = eval_at_proposed_nu - self.log_prob_modeling_prior
+        else:
+            rw_factor = 0.
 
         # sum across fpd samples 
         individ_likelihood = np.mean(np.exp(td_log_likelihoods+rw_factor),axis=1)
@@ -198,7 +224,7 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
 
         if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
             return -np.inf
-        if hyperparameters[1] < 0.05 or hyperparameters[1] > 5.: #omega_M 
+        if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
             return -np.inf
         elif hyperparameters[2] < 1.5 or hyperparameters[2] > 2.5: #mu(gamma_lens)
             return -np.inf
@@ -216,8 +242,8 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
         # h0 [0,150]
         if hyperparameters[0] < 0 or hyperparameters[0] > 150: 
             return -np.inf
-        # Omega_M [0.05,5.]
-        if hyperparameters[1] < 0.05 or hyperparameters[1] > 5.: 
+        # Omega_M [0.05,0.5]
+        if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: 
             return -np.inf
         #w0 [-2,0]
         elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
@@ -245,9 +271,9 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
             # order: [H0,Omega_M,mu_gamma,sigma_gamma]
             cur_state = np.empty((n_walkers,4))
             cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
-            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.9,size=n_walkers) #Omega_M
-            cur_state[:,2] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
-            cur_state[:,3] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
+            cur_state[:,2] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
+            cur_state[:,3] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
 
             return cur_state
         
@@ -255,11 +281,11 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
             # order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
             cur_state = np.empty((n_walkers,6))
             cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
-            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.9,size=n_walkers) #Omega_M
+            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
             cur_state[:,2] = uniform.rvs(loc=-1.5,scale=1.,size=n_walkers)
             cur_state[:,3] = uniform.rvs(loc=-1,scale=2,size=n_walkers)
-            cur_state[:,4] = uniform.rvs(loc=1.8,scale=0.4,size=n_walkers)
-            cur_state[:,5] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+            cur_state[:,4] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
+            cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.19,size=n_walkers)
 
             return cur_state
 
@@ -272,7 +298,6 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
                 - LCDM: [H0,Omega_M,mu_gamma,sigma_gamma] 
                 - w0waCDM: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
         """
-        print('hyperparameters: ', hyperparameters)
         # Prior
         if cosmo_model == 'LCDM':
             lp = LCDM_log_prior(hyperparameters)
@@ -281,12 +306,7 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
         # Likelihood
         if lp == 0:
             fll = tdc_likelihood.full_log_likelihood(hyperparameters)
-            print('fll: ', fll)
             lp += fll
-            print('lp: ', lp)
-
-        else:
-            print('nonzero log prior: ', lp)
 
         return lp
     
