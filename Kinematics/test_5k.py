@@ -204,15 +204,14 @@ if __name__ == '__main__':
     # test on 0th lens! start with 10 samples
     print('generating v_disps')
     start_time = time.time()
-    first10_maps = generator.generate_map(my_input[0,:10])
+    first5_maps = generator.generate_map(my_input[0,:5])
     
     v_disp = []
-    for i in range(0,10):
-        # TODO: check I'm indexing my_input correctly!
+    for i in range(0,5):
         v_disp.append(vdisp_calculator.v_disp_from_v_rms(
-            first10_maps[i],n_sersic=my_input[i,3],R_sersic=my_input[i,4]
+            first5_maps[i],n_sersic=my_input[0,i,3],R_sersic=my_input[0,i,4]
         ))
     end_time = time.time()
-    print(f"Time taken for 10 evaluations: {end_time - start_time} seconds")
+    print(f"Time taken for 5 evaluations: {end_time - start_time} seconds")
 
     print("Ex. v_disp output: ", v_disp[0])
