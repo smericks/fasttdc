@@ -1,12 +1,11 @@
-#import SKiNN
-#import torch
+import SKiNN
+import torch
 import pickle
 import numpy as np
-import pandas as pd
 import time
 import h5py
-#assert(torch.cuda.is_available()==True) #must be True to function
-#from SKiNN.generator import Generator
+assert(torch.cuda.is_available()==True) #must be True to function
+from SKiNN.batched_generator import BatchedGenerator
 
 # FROM LENSTRONOMY: https://github.com/lenstronomy/lenstronomy/blob/6de71de7f6cd8c5512764bb511e3bee5ac6d1d41/lenstronomy/Util/param_util.py#L92
 def ellipticity2phi_q(e1, e2):
@@ -26,11 +25,13 @@ def ellipticity2phi_q(e1, e2):
 # MAIN BODY
 ############
 
+print('reading data!')
+
 # TODO: read from DataVector
-exp_folder = ('/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/'+
-        'DataVectors/src_mag_cut_silver_debiased')
-#exp_folder = ('/scratch/users/sydney3/forecast/darkenergy-from-LAGN/'+
-#        'DataVectors/')
+#exp_folder = ('/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/'+
+#        'DataVectors/src_mag_cut_silver_debiased')
+exp_folder = ('/scratch/users/sydney3/forecast/darkenergy-from-LAGN/'+
+        'DataVectors/')
 
 lens_types = ['gold_quads']
 
@@ -88,32 +89,17 @@ b_ani = np.ones(np.shape(r_core))
 inclination = np.ones(np.shape(r_core))*85
 
 
-print(q_mass.shape)
-
 my_input = np.stack([q_mass,q_light,theta_E,
     n_sersic_light,R_sersic_light,r_core,
     gamma,b_ani,inclination],axis=-1)
 
-print(my_input.shape)
 
-
-
-generator=Generator()
+print('initializing generator')
+generator=BatchedGenerator()
 # test with a batch dim of 100...
+print('starting the generating')
 start_time = time.time()
-first100_maps = generator.generate_map(my_input[0,:100])
+first100_maps = generator.generate_map(my_input[0,:500])
 end_time = time.time()
-print(f"Time taken: {end_time - start_time} seconds")
+print(f"Time taken for 500 evaluations: {end_time - start_time} seconds")
 
-"""
-# TODO: make this operate over a batch
-# TODO: add timing
-
-vrms_map=np.array(generator.generate_map(my_input[0]))
-maps_first10 = np.empty((10,np.shape(vrms_map)[0],np.shape(vrms_map)[1]))
-maps_first10[0] = vrms_map
-for i in range(1,10):
-	vrms_map=np.array(generator.generate_map(my_input[i]))
-	maps_first10[i] = vrms_map
-np.save('test_vrms.npy',maps_first10)
-"""
