@@ -288,10 +288,12 @@ if __name__ == '__main__':
     print(f"Time taken for 5 SKiNN vdisp evaluations: {end_time - start_time} seconds")
 
     lens_param_samps = inputs_dict['gold_quads']['lens_param_samps']
+    print("shape of inputs dict R_sersic_truth: ", inputs_dict['gold_quads']['lens_light_parameters_R_sersic_truth'].shape)
     R_sersic0 = inputs_dict['gold_quads']['lens_light_parameters_R_sersic_truth'][0]
     n_sersic0 = inputs_dict['gold_quads']['lens_light_parameters_n_sersic_truth'][0]
     # let's try 5 lenses with galkin
     v_disp_galkin = []
+    print("lens_param_samps shape: ", lens_param_samps.shape)
     for i in range(0,5):
         v_disp_galkin.append(vdisp_calculator.v_disp_galkin(
             beta_ani=1.,theta_E=lens_param_samps[0,i,0],
