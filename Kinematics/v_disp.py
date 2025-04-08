@@ -298,6 +298,6 @@ if __name__ == '__main__':
             gamma_lens=lens_param_samps[0,i,3],
             R_sersic=R_sersic0,n_sersic=n_sersic0))
 
-    print("SKiNN v_disp output, lens 0: ", v_disp_skinn[0])
+    print("SKiNN v_disp outputs: ", v_disp_skinn)
     print(" ")
-    print("Galkin v_disp output, lens 0: ", v_disp_galkin[0])
+    print("Galkin v_disp outputs:  ", v_disp_galkin)
