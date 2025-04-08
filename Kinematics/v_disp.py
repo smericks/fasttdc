@@ -13,6 +13,7 @@ from lenstronomy.Data.pixel_grid import PixelGrid
 from lenstronomy.Data.psf import PSF
 from lenstronomy.LightModel.light_model import LightModel
 from lenstronomy.Util.param_util import phi_q2_ellipticity, ellipticity2phi_q
+from lenstronomy.Analysis.kinematics_api import KinematicsAPI
 
 
 ######################################
@@ -90,12 +91,15 @@ class VelocityDisp:
             psf_type='GAUSSIAN',fwhm=psf_fwhm
         )
         # set up PSF convolution params
+        self.psf_fwhm_arcsec = psf_fwhm
         psf_fwhm_pix = psf_fwhm/self.PIX_SIZE # in pixels
         self.psf_sigma_pix = psf_fwhm_pix / (2*np.sqrt(2*np.log(2))) # FWHM = 2sqrt(2*ln(2)) * sigma
 
         # Set up grid of Radius values for masking
         # sum within a circular aperture, with center region masked
+        self.R_ap_arcsec = R_aperture
         self.R_ap = R_aperture/self.PIX_SIZE # 2" aperture
+        self.R_inner_arcsec = R_inner_mask
         self.R_inner = R_inner_mask/self.PIX_SIZE # mask center 0.5" pixels
         # create grid and evaluate whether Radius is inside or outside R_aperture
         center_pix_vals = np.arange(-self.NUMPIX/2 +0.5,self.NUMPIX/2 +0.5, 1.)
@@ -119,6 +123,69 @@ class VelocityDisp:
             'center_y':0.
         }]
 
+        self._setup_galkin()
+
+    def _setup_galkin(self):
+
+        # circular aperture
+        self.kwargs_aperture = {
+            'aperture_type': 'shell', 
+            'r_in': self.R_inner_arcsec , 
+            'r_out': self.R_ap_arcsec,
+            'center_ra': 0, 'center_dec': 0}
+        self.kwargs_seeing = {'psf_type': 'GAUSSIAN', 'fwhm': self.psf_fwhm_arcsec}
+
+        self.kwargs_numerics_galkin = { 
+            'interpol_grid_num': 1000,  # numerical interpolation, should converge -> infinity
+            'log_integration': True,  # log or linear interpolation of surface brightness and mass models
+            'max_integrate': 100, 'min_integrate': 0.001}  # lower/upper bound of numerical integrals
+
+
+        self.kwargs_model = {
+            'lens_model_list':['SPP'],
+            'lens_light_model_list':['SERSIC']
+        }
+
+    def v_disp_galkin(self,beta_ani,theta_E,gamma_lens,R_sersic,n_sersic):
+        """
+        Args:
+            beta_ani (float): constant anisotropy value
+            inputs_dict_row (pandas df row): 
+        """
+
+        anisotropy_model = 'const'
+        kwargs_anisotropy = {'beta': beta_ani}
+
+        kwargs_lens = [{
+            'theta_E':theta_E, 
+            'gamma':gamma_lens, 
+            "center_x":0., 
+            "center_y":0.
+        }]
+
+        kwargs_lens_light = [{
+            'amp': 10.,
+            'R_sersic': R_sersic,
+            'n_sersic': n_sersic,
+            'center_x': 0.,
+            'center_y': 0.,
+        }]
+
+
+        tik = time.time()
+        kinematicsAPI = KinematicsAPI(0.5, 2., self.kwargs_model, 
+            self.kwargs_aperture, self.kwargs_seeing, anisotropy_model, 
+            kwargs_numerics_galkin=self.kwargs_numerics_galkin, 
+            lens_model_kinematics_bool=[True, False],
+            sampling_number=5000,MGE_light=True)  # numerical ray-shooting, should converge -> infinity)
+
+        vel_disp_numerical = kinematicsAPI.velocity_dispersion(kwargs_lens, 
+            kwargs_lens_light, kwargs_anisotropy, r_eff=R_sersic, theta_E=theta_E)
+        tok = time.time()
+
+        print('galkin eval time: ', tok-tik)
+
+        return vel_disp_numerical # in km/s
 
 
     def v_disp_from_v_rms(self,vrms_map,n_sersic,R_sersic):
@@ -212,12 +279,25 @@ if __name__ == '__main__':
     start_time = time.time()
     first5_maps = generator.generate_map(my_input[0,:5])
     
-    v_disp = []
+    v_disp_skinn = []
     for i in range(0,5):
-        v_disp.append(vdisp_calculator.v_disp_from_v_rms(
+        v_disp_skinn.append(vdisp_calculator.v_disp_from_v_rms(
             first5_maps[i],n_sersic=my_input[0,i,3],R_sersic=my_input[0,i,4]
         ))
     end_time = time.time()
-    print(f"Time taken for 5 evaluations: {end_time - start_time} seconds")
+    print(f"Time taken for 5 SKiNN vdisp evaluations: {end_time - start_time} seconds")
 
-    print("Ex. v_disp output: ", v_disp[0])
+    lens_param_samps = inputs_dict['gold_quads']['lens_param_samps']
+    R_sersic0 = inputs_dict['gold_quads']['lens_light_parameters_R_sersic_truth'][0]
+    n_sersic0 = inputs_dict['gold_quads']['lens_light_parameters_n_sersic_truth'][0]
+    # let's try 5 lenses with galkin
+    v_disp_galkin = []
+    for i in range(0,5):
+        v_disp_galkin.append(v_disp_galkin(
+            beta_ani=1.,theta_E=lens_param_samps[0,i,0],
+            gamma_lens=lens_param_samps[0,i,3],
+            R_sersic=R_sersic0,n_sersic=n_sersic0))
+
+    print("SKiNN v_disp output, lens 0: ", v_disp_skinn[0])
+    print(" ")
+    print("Galkin v_disp output, lens 0: ", v_disp_galkin[0])
