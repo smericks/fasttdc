@@ -293,7 +293,7 @@ if __name__ == '__main__':
     # let's try 5 lenses with galkin
     v_disp_galkin = []
     for i in range(0,5):
-        v_disp_galkin.append(v_disp_galkin(
+        v_disp_galkin.append(vdisp_calculator.v_disp_galkin(
             beta_ani=1.,theta_E=lens_param_samps[0,i,0],
             gamma_lens=lens_param_samps[0,i,3],
             R_sersic=R_sersic0,n_sersic=n_sersic0))
