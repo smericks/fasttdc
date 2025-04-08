@@ -134,16 +134,22 @@ class VelocityDisp:
         self.kwargs_lens_light[0]['R_sersic'] = R_sersic
 
         # Sigma(x,y) (surface brightness of the lens)
+        tik = time.time()
         lens_sb = self.lens_galaxy_model.lens_surface_brightness(
             self.kwargs_lens_light,unconvolved=True)
+        tok = time.time()
+        print('sb calculation time: ', tok-tik)
         # v_rms(x,y)
         v_rms = vrms_map
 
         # convolve with PSF
+        tik = time.time()
         numerator = gaussian_filter((lens_sb * (v_rms**2)),sigma=self.psf_sigma_pix,
             mode='nearest')
         denominator = gaussian_filter(lens_sb,sigma=self.psf_sigma_pix,
             mode='nearest')
+        tok = time.time()
+        print('convolution time: ', tok-tik)
 
         # zeroing out these #s is equivalent to ignoring them in the averaging
         numerator[self.R_grid>self.R_ap] = 0.
