@@ -55,9 +55,12 @@ def skinn_input(inputs_dict):
     r_core = np.ones(n_sersic_light.shape)*0.08
 
     # TODO: how to initialize these for now?
-    b_ani = np.ones(np.shape(r_core))
-    inclination = np.ones(np.shape(r_core))*85
+    b_ani = np.zeros(np.shape(r_core))
+    inclination = np.ones(np.shape(r_core))*90
 
+    # Switching to spherical!!
+    q_mass = np.ones(np.shape(r_core))
+    q_light = np.ones(np.shape(r_core))
 
     my_input = np.stack([q_mass,q_light,theta_E,
         n_sersic_light,R_sersic_light,r_core,
@@ -296,7 +299,7 @@ if __name__ == '__main__':
     print("lens_param_samps shape: ", lens_param_samps.shape)
     for i in range(0,5):
         v_disp_galkin.append(vdisp_calculator.v_disp_galkin(
-            beta_ani=1.,theta_E=lens_param_samps[0,i,0],
+            beta_ani=0.,theta_E=lens_param_samps[0,i,0],
             gamma_lens=lens_param_samps[0,i,3],
             R_sersic=R_sersic0,n_sersic=n_sersic0))
 
