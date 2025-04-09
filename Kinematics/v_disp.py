@@ -281,6 +281,8 @@ if __name__ == '__main__':
     print('generating v_disps')
     start_time = time.time()
     first5_maps = generator.generate_map(my_input[0,:5])
+
+    print('skinn input: ', my_input[0,:5])
     
     v_disp_skinn = []
     for i in range(0,5):
@@ -296,8 +298,9 @@ if __name__ == '__main__':
     n_sersic0 = inputs_dict['gold_quads']['lens_light_parameters_n_sersic_truth'][0]
     # let's try 5 lenses with galkin
     v_disp_galkin = []
-    print("lens_param_samps shape: ", lens_param_samps.shape)
     for i in range(0,5):
+        print('Galkin: theta_E: %.2f, gamma_lens: %.2f, n_sersic: %.2f, R_sersic: %.2f'%(
+            lens_param_samps[0,i,0], lens_param_samps[0,i,3],n_sersic0,R_sersic0))
         v_disp_galkin.append(vdisp_calculator.v_disp_galkin(
             beta_ani=0.,theta_E=lens_param_samps[0,i,0],
             gamma_lens=lens_param_samps[0,i,3],
