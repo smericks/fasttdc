@@ -204,22 +204,16 @@ class VelocityDisp:
         self.kwargs_lens_light[0]['R_sersic'] = R_sersic
 
         # Sigma(x,y) (surface brightness of the lens)
-        tik = time.time()
         lens_sb = self.lens_galaxy_model.lens_surface_brightness(
             self.kwargs_lens_light,unconvolved=True)
-        tok = time.time()
-        print('sb calculation time: ', tok-tik)
         # v_rms(x,y)
         v_rms = vrms_map
 
         # convolve with PSF
-        tik = time.time()
         numerator = gaussian_filter((lens_sb * (v_rms**2)),sigma=self.psf_sigma_pix,
             mode='nearest')
         denominator = gaussian_filter(lens_sb,sigma=self.psf_sigma_pix,
             mode='nearest')
-        tok = time.time()
-        print('convolution time: ', tok-tik)
 
         # zeroing out these #s is equivalent to ignoring them in the averaging
         numerator[self.R_grid>self.R_ap] = 0.
@@ -230,9 +224,9 @@ class VelocityDisp:
         v_rms_weighted = np.sum(numerator) / np.sum(denominator)
 
         #[sqrt{<$v_{rms}^2$>}]$_{A}$ 
-        v_rms_pred = np.sqrt(v_rms_weighted)
+        sigma_v_pred = np.sqrt(v_rms_weighted)
 
-        return v_rms_pred
+        return sigma_v_pred
 
 ########
 # Main
@@ -278,34 +272,36 @@ if __name__ == '__main__':
         R_inner_mask=0.2)
 
     # test on 0th lens! start with 10 samples
-    print('generating v_disps')
-    start_time = time.time()
-    first5_maps = generator.generate_map(my_input[0,:5])
 
-    print('skinn input: ', my_input[0,:5])
-    
-    v_disp_skinn = []
-    for i in range(0,5):
-        v_disp_skinn.append(vdisp_calculator.v_disp_from_v_rms(
-            first5_maps[i],n_sersic=my_input[0,i,3],R_sersic=my_input[0,i,4]
-        ))
-    end_time = time.time()
-    print(f"Time taken for 5 SKiNN vdisp evaluations: {end_time - start_time} seconds")
+    for lens_idx in [0,1,2]:
 
-    lens_param_samps = inputs_dict['gold_quads']['lens_param_samps']
-    print("shape of inputs dict R_sersic_truth: ", inputs_dict['gold_quads']['lens_light_parameters_R_sersic_truth'].shape)
-    R_sersic0 = inputs_dict['gold_quads']['lens_light_parameters_R_sersic_truth'][0]
-    n_sersic0 = inputs_dict['gold_quads']['lens_light_parameters_n_sersic_truth'][0]
-    # let's try 5 lenses with galkin
-    v_disp_galkin = []
-    for i in range(0,5):
-        print('Galkin: theta_E: %.2f, gamma_lens: %.2f, n_sersic: %.2f, R_sersic: %.2f'%(
-            lens_param_samps[0,i,0], lens_param_samps[0,i,3],n_sersic0,R_sersic0))
-        v_disp_galkin.append(vdisp_calculator.v_disp_galkin(
-            beta_ani=0.,theta_E=lens_param_samps[0,i,0],
-            gamma_lens=lens_param_samps[0,i,3],
-            R_sersic=R_sersic0,n_sersic=n_sersic0))
+        print('generating v_disps for lens %d'%(lens_idx))
+        start_time = time.time()
+        first5_maps = generator.generate_map(my_input[lens_idx,:5])
 
-    print("SKiNN v_disp outputs: ", v_disp_skinn)
-    print(" ")
-    print("Galkin v_disp outputs:  ", v_disp_galkin)
+        #print('skinn input: ', my_input[0,:5])
+        
+        v_disp_skinn = []
+        for i in range(0,5):
+            v_disp_skinn.append(vdisp_calculator.v_disp_from_v_rms(
+                first5_maps[i],n_sersic=my_input[lens_idx,i,3],R_sersic=my_input[lens_idx,i,4]
+            ))
+        end_time = time.time()
+        print(f"Time taken for 5 SKiNN vdisp evaluations: {end_time - start_time} seconds")
+
+        lens_param_samps = inputs_dict['gold_quads']['lens_param_samps']
+        R_sersic0 = inputs_dict['gold_quads']['lens_light_parameters_R_sersic_truth'][lens_idx]
+        n_sersic0 = inputs_dict['gold_quads']['lens_light_parameters_n_sersic_truth'][lens_idx]
+        # let's try 5 lenses with galkin
+        v_disp_galkin = []
+        for i in range(0,5):
+            #print('Galkin: theta_E: %.2f, gamma_lens: %.2f, n_sersic: %.2f, R_sersic: %.2f'%(
+            #    lens_param_samps[0,i,0], lens_param_samps[0,i,3],n_sersic0,R_sersic0))
+            v_disp_galkin.append(vdisp_calculator.v_disp_galkin(
+                beta_ani=0.,theta_E=lens_param_samps[lens_idx,i,0],
+                gamma_lens=lens_param_samps[lens_idx,i,3],
+                R_sersic=R_sersic0,n_sersic=n_sersic0))
+
+        print("SKiNN v_disp outputs: ", v_disp_skinn)
+        print(" ")
+        print("Galkin v_disp outputs:  ", v_disp_galkin)
