@@ -5,7 +5,7 @@ import numpy as np
 import time
 import h5py
 assert(torch.cuda.is_available()==True) #must be True to function
-from SKiNN.batched_generator import BatchedGenerator
+from SKiNN.batched_generator import Generator, BatchedGenerator
 
 from scipy.ndimage import gaussian_filter
 from lenstronomy.ImSim.image_model import ImageModel
@@ -265,7 +265,8 @@ if __name__ == '__main__':
     my_input = skinn_input(inputs_dict)
 
     print('initializing generator')
-    generator=BatchedGenerator()
+    generator = Generator()
+    batched_generator=BatchedGenerator()
 
     # initialize vdisp_calculator
     vdisp_calculator = VelocityDisp(psf_fwhm=0.5,R_aperture=0.725,
@@ -273,11 +274,16 @@ if __name__ == '__main__':
 
     # test on 0th lens! start with 10 samples
 
+    # TODO: Switch this transpose back
+    my_input = my_input.T
     for lens_idx in [0,1,2]:
-
+        # TODO: test on looped generator instead of batched generator!!!!
         print('generating v_disps for lens %d'%(lens_idx))
         start_time = time.time()
-        first5_maps = generator.generate_map(my_input[lens_idx,:5])
+        first5_maps = []
+        for k in range(0,5):
+            first5_maps.append(generator.generate_map(my_input[k]))
+        #first5_maps = generator.generate_map(my_input[lens_idx,:5])
 
         #print('skinn input: ', my_input[0,:5])
         
@@ -286,8 +292,8 @@ if __name__ == '__main__':
             v_disp_skinn.append(vdisp_calculator.v_disp_from_v_rms(
                 first5_maps[i],n_sersic=my_input[lens_idx,i,3],R_sersic=my_input[lens_idx,i,4]
             ))
-        end_time = time.time()
-        print(f"Time taken for 5 SKiNN vdisp evaluations: {end_time - start_time} seconds")
+        #end_time = time.time()
+        #print(f"Time taken for 5 SKiNN vdisp evaluations: {end_time - start_time} seconds")
 
         lens_param_samps = inputs_dict['gold_quads']['lens_param_samps']
         R_sersic0 = inputs_dict['gold_quads']['lens_light_parameters_R_sersic_truth'][lens_idx]
