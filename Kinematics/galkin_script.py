@@ -6,10 +6,10 @@ from lenstronomy.Analysis.kinematics_api import KinematicsAPI
 
 R_APERTURE = 0.725 #arcseconds
 PSF_FWHM = 0.5 #arcseconds
-H5_PATH = ('/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/'+
-            'DataVectors/src_mag_cut_silver_debiased/gold_quads.h5')
-#H5_PATH = ('/scratch/users/sydney3/forecast/darkenergy-from-LAGN/'+
-#            'DataVectors/gold_quads.h5')
+#H5_PATH = ('/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/'+
+#            'DataVectors/src_mag_cut_silver_debiased/gold_quads.h5')
+H5_PATH = ('/scratch/users/sydney3/forecast/darkenergy-from-LAGN/'+
+            'DataVectors/gold_quads.h5')
 
 BETA_PRIOR_MU = 0.
 BETA_PRIOR_SIGMA = 0.1
@@ -105,7 +105,13 @@ def main(args):
         if debug and i == 10:
             print(vel_disp_samples[:10])
             break
-        
+
+    # NOTE: dividing out distance ratio, need to multiply back in later...
+    vel_disp_samples = vel_disp_samples / distance_scaling_factor
+    np.save('/scratch/users/sydney3/forecast/darkenergy-from-LAGN/DataVectors/lens%03d_vdisp.npy'%(lens_idx),
+        vel_disp_samples)
+    np.save('/scratch/users/sydney3/forecast/darkenergy-from-LAGN/DataVectors/lens%03d_beta_ani.npy'%(lens_idx),
+        beta_ani_samps)    
     
 
 if __name__ == '__main__':
