@@ -37,6 +37,32 @@ def jax_ddt_from_redshifts(my_cosmology,z_lens,z_src):
 
     return Ddt
 
+@jax.jit
+def jax_kin_distance_ratio(my_cosmology,z_lens,z_src):
+    """
+    Computes: D_s / D_ds
+
+    Args:
+        my_cosmology (jax-cosmo Cosmology): jax-cosmo cosmology object
+        z_lens ([float]): lens redshifts
+        z_src ([float]): source redshifts
+
+    Returns:
+        kin_dist_ratio (jax array): (D_s / D_ds) (unitless)
+    """
+
+    # translate redshift to scale factor
+    a_lens = jc_utils.z2a(z_lens)
+    a_src = jc_utils.z2a(z_src)
+
+    D_s = jc_background.angular_diameter_distance(my_cosmology,a_src)/my_cosmology.h
+    # must do angular_diameter_distance_z1z2 by hand
+    comoving_ds = (jc_background.radial_comoving_distance(my_cosmology,a_src) -
+        jc_background.radial_comoving_distance(my_cosmology,a_lens))
+    D_ds = (comoving_ds / (z_src+1.))/my_cosmology.h
+
+    return D_s/D_ds
+
 def ddt_from_redshifts_colossus(my_cosmology,z_lens,z_src):
     """
     Ddt = (1+z_lens) (D_d*D_s)/(D_ds)

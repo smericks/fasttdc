@@ -25,7 +25,7 @@ class TDCLikelihood():
         Keep track of quantities that remain constant throughout the inference
 
         Args: 
-            td_measured_padded: array of td_measured, doubles padded w/ zeros 
+            td_measured: array of td_measured
                 doubles: (n_lenses,1)
                 quads: (n_lenses,3)
             td_likelihood_prec: array of precision matrices: 
@@ -76,7 +76,7 @@ class TDCLikelihood():
             self.log_prob_modeling_prior = uniform.logpdf(gamma_pred_samples,loc=1.,scale=2.)
             #self.log_prob_modeling_prior = norm.logpdf(gamma_pred_samples,loc=2.,scale=0.2)
         else:
-            hst_train0 = pd.read_csv('/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/MassModels/hst_train0_metadata.csv')
+            hst_train0 = pd.read_csv(r'/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/MassModels/hst_train0_metadata.csv')
             gamma_vals = hst_train0['main_deflector_parameters_gamma'].to_numpy().astype(float)
             gamma_kde = gaussian_kde(gamma_vals)
             self.log_prob_modeling_prior = np.empty((gamma_pred_samples.shape))
@@ -85,56 +85,24 @@ class TDCLikelihood():
 
     # compute predicted time delays from predicted fermat potential differences
     # requires an assumed cosmology (from hyperparameters) and redshifts
-    def td_pred_from_fpd_pred(self,hyperparameters):
+    def td_pred_from_fpd_pred(self,proposed_cosmo):
         """
         Args:
-            hyperparameters (): 
-                - LCDM order: [H0,Omega_M,mu_gamma,sigma_gamma]
-                - w0waCDM order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
-            fpd_pred_samples (size:(n_lenses,n_samples,3)): Note: it is assumed
-                doubles are padded with zeros
+            proposed_cosmo (default: jax_cosmo.Cosmology): built by
+                construct_proposed_cosmo() (see below)
 
         Returns:
             td_pred_samples (size:(n_lenses,n_samples,3))
         """
 
-        # construct cosmology object from hyperparameters
-        h0_input = hyperparameters[0]
-        # NOTE: baryonic fraction hardcoded to 0.05
-        omega_m_input = hyperparameters[1]
-        omega_c_input = hyperparameters[1] - 0.05 # CDM fraction
-        omega_de_input = 1. - omega_m_input
-        if self.cosmo_model == 'LCDM':
-             w0_input = -1.
-             wa_input = 0.
-        elif self.cosmo_model == 'w0waCDM':
-             w0_input = hyperparameters[2]
-             wa_input = hyperparameters[3]
-
-        if self.use_astropy: 
-            # instantiate astropy cosmology object
-            astropy_cosmo = w0waCDM(H0=h0_input,
-                Om0=omega_m_input,Ode0=omega_de_input,
-                w0=w0_input,wa=wa_input)
-            # do stuff
-            Ddt_computed = tdc_utils.ddt_from_redshifts(astropy_cosmo,
+        if self.use_astropy:
+            Ddt_computed = tdc_utils.ddt_from_redshifts(proposed_cosmo,
                 self.z_lens,self.z_src)
-            # TODO: convert from astropy quantity to numpy
-            Ddt_computed = np.array(Ddt_computed)
-
         else:
-            # NOTE: baryonic fraction hardcoded to 0.05
-            my_jax_cosmo = jax_cosmo.Cosmology(h=jnp.float32(h0_input/100),
-                        Omega_c=jnp.float32(omega_c_input), # "cold dark matter fraction"
-                        Omega_b=jnp.float32(0.05), # "baryonic fraction"
-                        Omega_k=jnp.float32(0.),
-                        w0=jnp.float32(w0_input),
-                        wa=jnp.float32(wa_input),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
-            
-            # compute time delay distances from cosmology and redshifts
-            Ddt_computed = tdc_utils.jax_ddt_from_redshifts(my_jax_cosmo,self.z_lens,self.z_src)
-            # convert to numpy
-            Ddt_computed = np.array(Ddt_computed)
+            Ddt_computed = tdc_utils.jax_ddt_from_redshifts(proposed_cosmo,
+                self.z_lens,self.z_src)
+        
+        Ddt_computed = np.array(Ddt_computed)
         # add batch dimensions for Ddt computed...
         Ddt_repeated = np.repeat(Ddt_computed[:, np.newaxis],
             self.num_fpd_samples, axis=1)
@@ -154,7 +122,7 @@ class TDCLikelihood():
         """
 
         x_minus_mu = (td_pred_samples-self.td_measured)
-        # add batch dimension for # of time delays dim.
+        # add dimension s.t. x_minus_mu is 2D
         x_minus_mu = np.expand_dims(x_minus_mu,axis=-1)
         # matmul should condense the (# of time delays) dim.
         exponent = -0.5*np.matmul(np.transpose(x_minus_mu,axes=(0,1,3,2)),
@@ -167,6 +135,45 @@ class TDCLikelihood():
         return self.td_likelihood_prefactors + exponent
         
         
+    def construct_proposed_cosmo(self,hyperparameters):
+        """
+        Args:
+            hyperparameters (): 
+                - LCDM order: [H0,Omega_M,mu_gamma,sigma_gamma]
+                - w0waCDM order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
+        """
+        # construct cosmology object from hyperparameters
+        h0_input = hyperparameters[0]
+        # NOTE: baryonic fraction hardcoded to 0.05
+        omega_m_input = hyperparameters[1]
+        omega_c_input = hyperparameters[1] - 0.05 # CDM fraction
+        omega_de_input = 1. - omega_m_input
+        if self.cosmo_model == 'LCDM':
+             w0_input = -1.
+             wa_input = 0.
+        elif self.cosmo_model == 'w0waCDM':
+             w0_input = hyperparameters[2]
+             wa_input = hyperparameters[3]
+
+        if self.use_astropy: 
+            # instantiate astropy cosmology object
+            astropy_cosmo = w0waCDM(H0=h0_input,
+                Om0=omega_m_input,Ode0=omega_de_input,
+                w0=w0_input,wa=wa_input)
+            
+            return astropy_cosmo
+
+        else:
+            # NOTE: baryonic fraction hardcoded to 0.05
+            my_jax_cosmo = jax_cosmo.Cosmology(h=jnp.float32(h0_input/100),
+                        Omega_c=jnp.float32(omega_c_input), # "cold dark matter fraction"
+                        Omega_b=jnp.float32(0.05), # "baryonic fraction"
+                        Omega_k=jnp.float32(0.),
+                        w0=jnp.float32(w0_input),
+                        wa=jnp.float32(wa_input),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
+            
+            return my_jax_cosmo
+
     def full_log_likelihood(self,hyperparameters):
         """
         Args:
@@ -174,10 +181,12 @@ class TDCLikelihood():
             fpd_pred_samples (size:(n_lenses,n_samples,3)): Note, it is assumed 
                 that doubles are padded w/ zeros
         """
+        
+        # construct cosmology from hyperparameters
+        proposed_cosmo = self.construct_proposed_cosmo(hyperparameters)
 
         # td_pred_samples from fpd_pred_samples
-        td_pred_samples = self.td_pred_from_fpd_pred(hyperparameters)
-
+        td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo)
         td_log_likelihoods = self.td_log_likelihood_per_samp(td_pred_samples)
 
         # reweighting factor
@@ -193,7 +202,6 @@ class TDCLikelihood():
         individ_likelihood = np.mean(np.exp(td_log_likelihoods+rw_factor),axis=1)
 
         # sum over all lenses
-        # TODO: check for any log of zero!!
         if np.sum(individ_likelihood == 0) > 0:
             return -np.inf
 
@@ -208,9 +216,145 @@ class TDCLikelihood():
 # TODO: implement this class
 class TDCKinLikelihood(TDCLikelihood):
 
-    def __init__(self):
-        print("TODO!")
+    def __init__(self,td_measured,td_likelihood_prec,
+        sigma_v_measured,sigma_v_likelihood_prec,
+        fpd_samples,gamma_pred_samples,kin_pred_samples,z_lens,z_src,
+        log_prob_modeling_prior=None,cosmo_model='LCDM',use_gamma_info=True,
+        use_astropy=False):
+        """
+        Keep track of quantities that remain constant throughout the inference
 
+        Args: 
+            td_measured: array of td_measured 
+                doubles: (n_lenses,1)
+                quads: (n_lenses,3)
+            td_likelihood_prec: array of precision matrices: 
+                - doubles: ((1/sigma^2))
+                - quads: ((1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2))
+            sigma_v_measured: 
+                single-aperture: (n_lenses,1)
+                IFU: (n_lenses,n_bins)
+            sigma_v_likelihood_prec: array of Gaussian measurement error 
+                in the form of precision matrices
+            fpd_samples: array of fermat potential difference posterior samples
+                doubles: (n_lenses,n_fpd_samples,1)
+                quads: (n_lenses,n_fpd_samples,3)
+            gamma_pred_samples (np.array(float)): 
+                gamma samples associated with each set of fpd samples.
+                (n_lenses,n_fpd_samples)
+            kin_pred_samples (np.array(float)): this tracks the quantity:
+                 c*sqrt(mathcal{J}(xi_mass,xi_light,beta_ani)),
+                this is the "dimensionless and cosmology-independent term of 
+                the Jeans equation", see Eqn 17 in TDCOSMO IV:  
+                 sigma_v = c * sqrt(D_s/D_ds) * sqrt(mathcal{J})
+                size of array: (n_lenses,n_fpd_samples,num_kin_bins)
+            z_lens (np.array(float), size:(n_lenses)): lens redshifts
+            z_src (np.array(float), size:(n_lenses)): source redshifts
+            log_prob_modeling_prior: TODO
+            cosmo_model (string): 'LCDM' or 'w0waCDM'
+            use_gamma_info (bool): If False, removes reweighting from likelihood
+                evaluation (any population level gamma params should just 
+                return the prior then...)
+        """
+
+        super().__init__(td_measured,td_likelihood_prec,fpd_samples,
+            gamma_pred_samples,z_lens,z_src,
+            log_prob_modeling_prior,cosmo_model,use_gamma_info,
+            use_astropy)
+
+        # track kinematic information
+        self.num_kin_bins = kin_pred_samples.shape[2]
+        self.kin_pred_samples = kin_pred_samples
+
+        # pad measurements with a 2nd batch dim for # of fpd samples
+        self.sigma_v_measured = np.repeat(sigma_v_measured[:, np.newaxis, :],
+            self.num_fpd_samples, axis=1)
+        self.sigma_v_likelihood_prec = np.repeat(
+            sigma_v_likelihood_prec[:, np.newaxis, :, :],
+            self.num_fpd_samples, axis=1)
+        
+        k_dim = self.num_kin_bins
+        self.sigma_v_likelihood_prefactors = np.log( (1/(2*np.pi)**(k_dim/2)) / 
+            np.sqrt(np.linalg.det(np.linalg.inv(self.sigma_v_likelihood_prec))))
+        
+
+    
+    def sigma_v_pred_from_kin_pred(self,proposed_cosmo):
+
+        if self.use_astropy:
+            raise ValueError("astropy option not implemented for TDC+Kin")
+        else:
+            Ds_div_Dds_computed = tdc_utils.jax_kin_distance_ratio(
+                proposed_cosmo,self.z_lens,self.z_src)
+        
+        Ds_div_Dds_computed = np.array(Ds_div_Dds_computed)
+        # add batch dimensions for fpd_samples
+        Ds_div_Dds_repeated = np.repeat(Ds_div_Dds_computed[:, np.newaxis],
+            self.num_fpd_samples, axis=1) 
+        # add batch dimension for # kinematic bins
+        Ds_div_Dds_repeated = np.repeat(Ds_div_Dds_repeated[:, :, np.newaxis],
+            self.num_kin_bins, axis=2) 
+        # scale the kin_pred with cosmology term: sigma_v = sqrt(Ds/Dds)*c*sqrt(mathcal{J})
+        return np.sqrt(Ds_div_Dds_repeated)*self.kin_pred_samples
+    
+
+    def sigma_v_log_likelihood_per_samp(self,sigma_v_pred_samples):
+        """
+        Args:
+            sigma_v_pred_samples (n_lenses,n_fpd_samps,num_kin_bins)
+
+        Returns:
+            td_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
+        """
+
+        x_minus_mu = (sigma_v_pred_samples-self.sigma_v_measured)
+        # add dimension s.t. x_minus_mu is 2D
+        x_minus_mu = np.expand_dims(x_minus_mu,axis=-1)
+        # matmul should condense the (# of time delays) dim.
+        exponent = -0.5*np.matmul(np.transpose(x_minus_mu,axes=(0,1,3,2)),
+            np.matmul(self.sigma_v_likelihood_prec,x_minus_mu))
+
+        # reduce to two dimensions: (n_lenses,n_fpd_samples)
+        exponent = np.squeeze(exponent)
+
+        # log-likelihood
+        return self.sigma_v_likelihood_prefactors + exponent
+
+
+    def full_log_likelihood(self, hyperparameters):
+
+        # construct cosmology from hyperparameters
+        proposed_cosmo = self.construct_proposed_cosmo(hyperparameters)
+
+        # td log likelihood per sample
+        td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo)
+        td_log_likelihoods = self.td_log_likelihood_per_samp(td_pred_samples)
+
+        # kin log likelihood per sample
+        sigma_v_pred_samples = self.sigma_v_pred_from_kin_pred(proposed_cosmo)
+        sigma_v_log_likelihoods = self.sigma_v_log_likelihood_per_samp(sigma_v_pred_samples)
+
+        # reweighting factor
+        # NOTE: hardcoding of hyperparameter order!! (-2 is mu, -1 is sigma)
+        if self.use_gamma_info:
+            eval_at_proposed_nu = norm.logpdf(self.gamma_pred_samples,
+                loc=hyperparameters[-2],scale=hyperparameters[-1])
+            rw_factor = eval_at_proposed_nu - self.log_prob_modeling_prior
+        else:
+            rw_factor = 0.
+
+        # sum across fpd samples 
+        individ_likelihood = np.mean(
+            np.exp(td_log_likelihoods+sigma_v_log_likelihoods+rw_factor),
+            axis=1)
+
+        # sum over all lenses
+        if np.sum(individ_likelihood == 0) > 0:
+            return -np.inf
+
+        log_likelihood = np.sum(np.log(individ_likelihood))
+
+        return log_likelihood
 
 
 #########################

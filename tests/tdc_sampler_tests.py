@@ -9,8 +9,6 @@ class TDCSamplerTests(unittest.TestCase):
 
     def setUp(self):
 
-        # TODO: now we split up doubles and quads
-
         self.td_measured_dbls = np.asarray([
             [100],
         ])
@@ -50,6 +48,19 @@ class TDCSamplerTests(unittest.TestCase):
             [1.8,1.75,1.9,1.85,1.9]
         ])
 
+        # kinematics
+        self.sigma_v_measured = np.asarray([
+            [130.]
+        ])
+
+        self.sigma_v_likelihood_prec = np.asarray([
+            [[1/25.]]
+        ])
+
+        self.kin_pred_samples = np.asarray([
+            [[120.],[140.],[150.],[100.],[110.]]
+        ])
+
     def test_tdclikelihood(self):
 
         # make TDCLikelihood object
@@ -80,16 +91,17 @@ class TDCSamplerTests(unittest.TestCase):
             self.assertEqual(np.shape(likelihood_per_samp)[i],s)
 
         # FUNCTION 2: td_pred_from_fpd_pred(hyperparameters)
-        # h0,mu(gamma_lens),sigma(gamma_lens)
+        # h0,Omega_M,mu(gamma_lens),sigma(gamma_lens)
         hyperparameters = [70.,0.3,2.0,0.1]
-        td_predicted_dbls = dbl_lklhd.td_pred_from_fpd_pred(hyperparameters)
+        proposed_cosmo = dbl_lklhd.construct_proposed_cosmo(hyperparameters)
+        td_predicted_dbls = dbl_lklhd.td_pred_from_fpd_pred(proposed_cosmo)
 
         # test that shape of output is (num_lenses,num_fpd_samples,1) for dbls
         for i,s in enumerate([1,5,1]):
             self.assertEqual(np.shape(td_predicted_dbls)[i],s)
 
         # check for last dim. (num_lenses,num_fpd_samples,3) for quads
-        td_predicted_quads = quad_lklhd.td_pred_from_fpd_pred(hyperparameters)
+        td_predicted_quads = quad_lklhd.td_pred_from_fpd_pred(proposed_cosmo)
         self.assertEqual(np.shape(td_predicted_quads)[2],3)
 
 
@@ -111,8 +123,8 @@ class TDCSamplerTests(unittest.TestCase):
             # lens 1 (the double)
             lens1_computed_ll = dbl_lklhd.full_log_likelihood(hyperparameters)
 
-            # TODO: should do the math & compare with what this outputs
-            td_pred_samples = dbl_lklhd.td_pred_from_fpd_pred(hyperparameters)
+            proposed_cosmo = dbl_lklhd.construct_proposed_cosmo(hyperparameters)
+            td_pred_samples = dbl_lklhd.td_pred_from_fpd_pred(proposed_cosmo)
 
             # lens 1 (the double)
             lens1_likelihood = 0
@@ -135,8 +147,9 @@ class TDCSamplerTests(unittest.TestCase):
             # lens 2 (the quad)
             lens2_computed_ll = quad_lklhd.full_log_likelihood(hyperparameters)
 
-            # TODO: should do the math & compare with what this outputs
-            td_pred_samples = quad_lklhd.td_pred_from_fpd_pred(hyperparameters)
+            # proposed_cosmo is still the same here...
+            td_pred_samples = quad_lklhd.td_pred_from_fpd_pred(proposed_cosmo)
+
             lens2_likelihood = 0
             for f in range(0,5):
                 my_pred = np.asarray(td_pred_samples[0][f])
@@ -160,6 +173,49 @@ class TDCSamplerTests(unittest.TestCase):
         likelihood_test_case(dbl_lklhd_w0wa,quad_lklhd_w0wa,hyperparameters=[70,0.3,-1.,0.,2.0,0.2])
 
 
+    def test_tdckinlikelihood(self):
+
+        # initialize likelihood object
+
+        quad_kin_lklhd = tdc_sampler.TDCKinLikelihood(
+                    self.td_measured_quads,self.td_prec_quads,
+                    self.sigma_v_measured,self.sigma_v_likelihood_prec,
+                    self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
+                    self.kin_pred_samples,
+                    z_lens=[0.6],z_src=[1.3])
+        
+        # h0,Omega_M,mu(gamma_lens),sigma(gamma_lens)
+        hyperparameters = [70.,0.3,2.0,0.1]
+        # NOTE: this prior model matches the default option in TDCLikelihood
+        prior_gamma_model = uniform(loc=1.,scale=2.)
+        proposed_gamma_model = norm(loc=hyperparameters[-2],scale=hyperparameters[-1])
+
+        # lens 1 (the double)
+        lens1_computed_ll = quad_kin_lklhd.full_log_likelihood(hyperparameters)
+
+        # TODO: should do the math & compare with what this outputs
+        proposed_cosmo = quad_kin_lklhd.construct_proposed_cosmo(hyperparameters)
+        td_pred_samples = quad_kin_lklhd.td_pred_from_fpd_pred(proposed_cosmo)
+
+        # lens 1 (the double)
+        lens1_likelihood = 0
+        for f in range(0,5):
+            my_pred = td_pred_samples[0][f][0]
+            exponent = (-0.5*(my_pred - self.td_measured_dbls[0][0])**2 * 
+                self.td_prec_dbls[0][0][0])
+            log_prefactor = (np.log((1/(2*np.pi))**(0.5) / 
+                np.sqrt(10.)) )# NOTE: hardcoded
+            gamma_samp = self.gamma_pred_samples_dbls[0][f]
+            rw_factor = (proposed_gamma_model.logpdf(gamma_samp) - 
+                prior_gamma_model.logpdf(gamma_samp))
+            lens1_log_likelihood = log_prefactor + exponent + rw_factor
+            lens1_likelihood += np.exp(lens1_log_likelihood)
+
+        lens1_likelihood /= 5
+
+        #self.assertAlmostEqual(lens1_computed_ll,np.log(lens1_likelihood))
+        
+
     def test_fast_tdc(self):
 
         # make TDCLikelihood object
@@ -170,14 +226,29 @@ class TDCSamplerTests(unittest.TestCase):
             self.fpd_pred_samples_dbls,self.gamma_pred_samples_dbls,
             z_lens=[0.5],z_src=[1.2])
         
+        def check_chain_moves(mcmc_chain):
+            # loop over params, check that chain is moving
+            for param_idx in range(0,mcmc_chain.shape[2]):
+                # isolate a single walker
+                single_chain = mcmc_chain[0,:,param_idx]
+                # check if chain has moved away from starting point
+                diff_from_initial = single_chain[1:] - single_chain[0]
+                self.assertNotAlmostEqual(0.,np.sum(diff_from_initial) )
+
+
         # check if it works, test_chain dims are: (walkers,samples,params)
         test_chain = tdc_sampler.fast_TDC([my_tdc],num_emcee_samps=5,
             n_walkers=20)
+        check_chain_moves(test_chain)
+
+
+        # Combine doubles and quads, check it works...
+        quads_tdc_lhood = tdc_sampler.TDCLikelihood(
+            self.td_measured_quads,self.td_prec_quads,
+            self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
+            z_lens=[0.6],z_src=[1.3])
         
-        # loop over params, check that chain is moving
-        for param_idx in range(0,test_chain.shape[2]):
-            # isolate a single walker
-            single_chain = test_chain[0,:,param_idx]
-            # check if chain has moved away from starting point
-            diff_from_initial = single_chain[1:] - single_chain[0]
-            self.assertNotAlmostEqual(0.,np.sum(diff_from_initial) )
+        # check if it works, test_chain dims are: (walkers,samples,params)
+        test_chain = tdc_sampler.fast_TDC([my_tdc,quads_tdc_lhood],
+            num_emcee_samps=5,n_walkers=20)
+        check_chain_moves(test_chain)
