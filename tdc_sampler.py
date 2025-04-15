@@ -200,21 +200,77 @@ class TDCLikelihood():
 
         return log_likelihood
 
+############
+# TDC + Kin
+############
+
+class TDCKinLikelihood(TDCLikelihood):
+
+    def __init__(self,td_measured_padded,td_likelihood_prec,td_likelihood_prefactors,
+        fpd_samples_padded,gamma_pred_samples,jeans_mass_samples,z_lens,z_src,
+        log_prob_modeling_prior=None,cosmo_model='LCDM',
+        use_gamma_info=True,use_astropy=False):
+        """
+        Keep track of quantities that remain constant throughout the inference
+
+        Args: 
+            td_measured_padded: array of td_measured, doubles padded w/ zeros 
+                (n_lenses,3)
+            td_likelihood_prec: array of precision matrices: 
+                - doubles: ((1/sigma^2 0 0 ),(0 0 0),(0 0 0 )
+                - quads: (1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2)
+            td_likelihood_prefactors:  array of log-space additive prefactors: 
+                log( (1/(2pi)^k/2) * 1/sqrt(det(Sigma)) )
+                - doubles: k=1,det(Sigma)=det([sigma^2])
+                - quads: k=3, det(Sigma)=det(Sigma)
+            fpd_samples_padded: array of fpd_samples, doubles padded w/ zeros
+                (n_lenses,n_fpd_samples,3)
+            gamma_pred_samples (np.array(float)): 
+                gamma samples associated with each set of fpd samples.
+                (n_lenses,n_fpd_samples)
+            jeans_mass_samples ()
+            z_lens (np.array(float), size:(n_lenses)): lens redshifts
+            z_src (np.array(float), size:(n_lenses)): source redshifts
+            log_prob_modeling_prior: TODO
+            cosmo_model (string): 'LCDM' or 'w0waCDM'
+            use_gamma_info (bool): If False, removes reweighting from likelihood
+                evaluation (any population level gamma params should just 
+                return the prior then...)
+        """
+
+
+        super.__init__(td_measured_padded,td_likelihood_prec,td_likelihood_prefactors,
+            fpd_samples_padded,gamma_pred_samples,z_lens,z_src,
+            log_prob_modeling_prior,cosmo_model,
+            use_gamma_info,use_astropy)
+        
+        # TODO: initialize kinematics things
+        self.jeans_mass_samples = jeans_mass_samples
+
+
 
 #########################
 # Sampling Implementation
 #########################
 
-def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
+def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     n_walkers=20):
     """
     Args:
-        tdc_likelihood (TDCLikelihood object)
-        cosmo_model (string): 'LCDM' or 'w0waCDM'
+        tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
+            (will add log likelihoods together)
         num_emcee_samps (int): Number of iterations for MCMC inference
         n_walkers (int): Number of emcee walkers
         
+    Returns: 
+        mcmc chain (emcee.EnsemblerSampler.chain)
     """
+
+    # Retrieve cosmo_model from likelihood object?
+    cosmo_model = tdc_likelihood_list[0].cosmo_model
+    for i in range(1,len(tdc_likelihood_list)):
+        if tdc_likelihood_list[i].cosmo_model != cosmo_model:
+            raise ValueError("")
 
     def LCDM_log_prior(hyperparameters):
         """
@@ -305,8 +361,9 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
             lp = w0waCDM_log_prior(hyperparameters)
         # Likelihood
         if lp == 0:
-            fll = tdc_likelihood.full_log_likelihood(hyperparameters)
-            lp += fll
+            for tdc_likelihood in tdc_likelihood_list:
+                fll = tdc_likelihood.full_log_likelihood(hyperparameters)
+                lp += fll
 
         return lp
     
@@ -320,4 +377,4 @@ def fast_TDC(tdc_likelihood,cosmo_model='LCDM',num_emcee_samps=1000,
     tok_mcmc = time.time()
     print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
 
-    return sampler.chain
+    return sampler.get_chain()

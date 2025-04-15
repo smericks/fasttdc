@@ -240,15 +240,18 @@ class OM10LensCatalog(LensCatalog):
 
         # track other params as well
         self.lens_df['src_mag_app'] = df['source_parameters_mag_app']
-
+        # save lens light info for kinematics
+        ll_param_list = [
+            'lens_light_parameters_R_sersic',
+            'lens_light_parameters_n_sersic',
+            'lens_light_parameters_e1','lens_light_parameters_e2',
+        ]
+        for key in ll_param_list:
+            self.lens_df[key] = df[key]
+            
         # redshifts!
         self.lens_df['z_lens'] = df['main_deflector_parameters_z_lens']
         self.lens_df['z_src'] = df['source_parameters_z_source']
 
         # drop not doubles/quads, compute ground truth time delays
         self.populate_truth_time_delays()
-
-
-#def EmulatedLensCatalog(LensCatalog):
-
-#    def 

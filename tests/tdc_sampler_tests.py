@@ -131,3 +131,27 @@ class TDCSamplerTests(unittest.TestCase):
         likelihood_test_case(my_tdc,hyperparameters = [70.,0.3,2.0,0.2])
         # w0waCDM case
         likelihood_test_case(my_w0wa_tdc,hyperparameters=[70,0.3,-1.,0.,2.0,0.2])
+
+
+    def test_fast_tdc(self):
+
+        # make TDCLikelihood object
+        z_lens = [0.5,0.6]
+        z_src = [1.2,1.3]
+        my_tdc = tdc_sampler.TDCLikelihood(
+            self.td_measured,self.td_prec,
+            self.td_prefactors,
+            self.fpd_pred_samples,self.gamma_pred_samples,
+            z_lens,z_src)
+        
+        # check if it works, test_chain dims are: (walkers,samples,params)
+        test_chain = tdc_sampler.fast_TDC([my_tdc],num_emcee_samps=5,
+            n_walkers=20)
+        
+        # loop over params, check that chain is moving
+        for param_idx in range(0,test_chain.shape[2]):
+            # isolate a single walker
+            single_chain = test_chain[0,:,param_idx]
+            # check if chain has moved away from starting point
+            diff_from_initial = single_chain[1:] - single_chain[0]
+            self.assertNotAlmostEqual(0.,np.sum(diff_from_initial) )
