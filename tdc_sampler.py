@@ -2,12 +2,20 @@ import jax_cosmo
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-from scipy.stats import norm, uniform, gaussian_kde
+from scipy.stats import norm, truncnorm, uniform, gaussian_kde
 from astropy.cosmology import w0waCDM
 import tdc_utils
 import emcee
 import time
 
+
+"""
+cosmo_models available: 
+    'LCDM': [H0,OmegaM,mu(gamma_lens),sigma(gamma_lens)]
+    'w0waCDM': [H0,OmegaM,w0,wa,mu(gamma_lens),sigma(gamma_lens)]
+    'LCDM_lambda_int': [H0,OmegaM,mu(lambda_int),sigma(lambda_int),
+        mu(gamma_lens),sigma(gamma_lens)]
+"""
 
 ###########################
 # TDC Likelihood Functions
@@ -50,15 +58,19 @@ class TDCLikelihood():
         #    are removed)
         self.z_lens = np.squeeze(np.asarray(z_lens))
         self.z_src = np.squeeze(np.asarray(z_src))
+        if cosmo_model not in ['LCDM','LCDM_lambda_int','w0waCDM']:
+            raise ValueError("choose from available cosmo_models: "+
+                "LCDM, LCDM_lambda_int, w0waCDM")
         self.cosmo_model = cosmo_model
         self.use_gamma_info = use_gamma_info
         self.use_astropy = use_astropy
         # make sure the dims are right
-        self.gamma_pred_samples = gamma_pred_samples
-        self.num_fpd_samples = len(gamma_pred_samples[0])
+        self.num_lenses = fpd_samples.shape[0]
+        self.num_fpd_samples = fpd_samples.shape[1]
         self.dim_fpd = fpd_samples.shape[2]
         
         # keep track internally
+        self.gamma_pred_samples = gamma_pred_samples
         self.fpd_samples = fpd_samples
         # pad with a 2nd batch dim for # of fpd samples
         self.td_measured = np.repeat(td_measured[:, np.newaxis, :],
@@ -85,11 +97,12 @@ class TDCLikelihood():
 
     # compute predicted time delays from predicted fermat potential differences
     # requires an assumed cosmology (from hyperparameters) and redshifts
-    def td_pred_from_fpd_pred(self,proposed_cosmo):
+    def td_pred_from_fpd_pred(self,proposed_cosmo,lambda_int_samples=None):
         """
         Args:
             proposed_cosmo (default: jax_cosmo.Cosmology): built by
                 construct_proposed_cosmo() (see below)
+            lambda_int_samples (): shape=(num_lenses,num_fpd_samples)
 
         Returns:
             td_pred_samples (size:(n_lenses,n_samples,3))
@@ -109,7 +122,15 @@ class TDCLikelihood():
         Ddt_repeated = np.repeat(Ddt_repeated[:,:, np.newaxis],
             self.dim_fpd, axis=2)
         # compute predicted time delays (this function should work w/ arrays)
-        return tdc_utils.td_from_ddt_fpd(Ddt_repeated,self.fpd_samples)
+        td_pred = tdc_utils.td_from_ddt_fpd(Ddt_repeated,self.fpd_samples)
+        
+        # Linear scaling if lambda_int is present
+        if lambda_int_samples is not None:
+            lambda_int_repeated = np.repeat(lambda_int_samples[:,:,np.newaxis],
+                self.dim_fpd, axis=2)
+            td_pred *= lambda_int_repeated
+
+        return td_pred
 
     # TDC Likelihood per lens per fpd sample (only condense along num. images dim.)
     def td_log_likelihood_per_samp(self,td_pred_samples):
@@ -140,6 +161,8 @@ class TDCLikelihood():
         Args:
             hyperparameters (): 
                 - LCDM order: [H0,Omega_M,mu_gamma,sigma_gamma]
+                - LCDM_lambda_int order: [H0,Omega_M,mu_lambda_int,
+                    sigma_lambda_int,mu_gamma,sigma_gamma]
                 - w0waCDM order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
         """
         # construct cosmology object from hyperparameters
@@ -148,7 +171,7 @@ class TDCLikelihood():
         omega_m_input = hyperparameters[1]
         omega_c_input = hyperparameters[1] - 0.05 # CDM fraction
         omega_de_input = 1. - omega_m_input
-        if self.cosmo_model == 'LCDM':
+        if self.cosmo_model in ['LCDM','LCDM_lambda_int'] :
              w0_input = -1.
              wa_input = 0.
         elif self.cosmo_model == 'w0waCDM':
@@ -173,6 +196,33 @@ class TDCLikelihood():
                         wa=jnp.float32(wa_input),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
             
             return my_jax_cosmo
+        
+    def process_hyperparam_proposal(self,hyperparameters):
+        """
+        Args: 
+            hyperparameters (): 
+                - LCDM order: [H0,Omega_M,mu_gamma,sigma_gamma]
+                - LCDM_lambda_int order: [H0,Omega_M,mu_lambda_int,
+                    sigma_lambda_int,mu_gamma,sigma_gamma]
+                - w0waCDM order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
+        Returns: 
+            proposed_cosmo (default=jax_cosmo.Cosmology)
+            lambda_int_samples (): Set to None if no lambda_int in hypermodel.
+                If in hypermodel, shape=(num_lenses,num_fpd_samples)
+        """
+
+        # importance sampling over lambda_int based on proposal distribution
+        lambda_int_samples = None
+        if self.cosmo_model == 'LCDM_lambda_int':
+            # NOTE: hardcoding of hyperparameter order!! (-4 is mu, -3 is sigma)
+            mu_lint = hyperparameters[-4]
+            sigma_lint = hyperparameters[-3]
+            # truncating to avoid values below 0 (unphysical)
+            lambda_int_samples = truncnorm.rvs(-mu_lint/sigma_lint,np.inf,
+                loc=mu_lint,scale=sigma_lint,
+                size=(self.num_lenses,self.num_fpd_samples))
+
+        return self.construct_proposed_cosmo(hyperparameters),lambda_int_samples
 
     def full_log_likelihood(self,hyperparameters):
         """
@@ -182,11 +232,13 @@ class TDCLikelihood():
                 that doubles are padded w/ zeros
         """
         
-        # construct cosmology from hyperparameters
-        proposed_cosmo = self.construct_proposed_cosmo(hyperparameters)
+        # construct cosmology + lint samps (if required) from hyperparameters
+        proposed_cosmo, lambda_int_samples = self.process_hyperparam_proposal(
+            hyperparameters)
 
         # td_pred_samples from fpd_pred_samples
-        td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo)
+        td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo,
+            lambda_int_samples)
         td_log_likelihoods = self.td_log_likelihood_per_samp(td_pred_samples)
 
         # reweighting factor
@@ -279,7 +331,13 @@ class TDCKinLikelihood(TDCLikelihood):
         
 
     
-    def sigma_v_pred_from_kin_pred(self,proposed_cosmo):
+    def sigma_v_pred_from_kin_pred(self,proposed_cosmo,lambda_int_samples=None):
+        """
+        Args:
+            proposed_cosmo (default: jax_cosmo.Cosmology): built by
+                construct_proposed_cosmo() (see below)
+            lambda_int_samples (): shape=(num_lenses,num_fpd_samples)
+        """
 
         if self.use_astropy:
             raise ValueError("astropy option not implemented for TDC+Kin")
@@ -295,7 +353,15 @@ class TDCKinLikelihood(TDCLikelihood):
         Ds_div_Dds_repeated = np.repeat(Ds_div_Dds_repeated[:, :, np.newaxis],
             self.num_kin_bins, axis=2) 
         # scale the kin_pred with cosmology term: sigma_v = sqrt(Ds/Dds)*c*sqrt(mathcal{J})
-        return np.sqrt(Ds_div_Dds_repeated)*self.kin_pred_samples
+        sigma_v_pred = np.sqrt(Ds_div_Dds_repeated)*self.kin_pred_samples
+
+        # sqrt(lambda) scaling if lambda_int is present
+        if lambda_int_samples is not None:
+            lambda_int_repeated = np.repeat(lambda_int_samples[:,:,np.newaxis],
+                self.num_kin_bins, axis=2)
+            sigma_v_pred *= np.sqrt(lambda_int_repeated)
+
+        return sigma_v_pred
     
 
     def sigma_v_log_likelihood_per_samp(self,sigma_v_pred_samples):
@@ -324,14 +390,17 @@ class TDCKinLikelihood(TDCLikelihood):
     def full_log_likelihood(self, hyperparameters):
 
         # construct cosmology from hyperparameters
-        proposed_cosmo = self.construct_proposed_cosmo(hyperparameters)
+        proposed_cosmo, lambda_int_samples = self.process_hyperparam_proposal(
+            hyperparameters)
 
         # td log likelihood per sample
-        td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo)
+        td_pred_samples = self.td_pred_from_fpd_pred(
+            proposed_cosmo,lambda_int_samples)
         td_log_likelihoods = self.td_log_likelihood_per_samp(td_pred_samples)
 
         # kin log likelihood per sample
-        sigma_v_pred_samples = self.sigma_v_pred_from_kin_pred(proposed_cosmo)
+        sigma_v_pred_samples = self.sigma_v_pred_from_kin_pred(
+            proposed_cosmo,lambda_int_samples)
         sigma_v_log_likelihoods = self.sigma_v_log_likelihood_per_samp(sigma_v_pred_samples)
 
         # reweighting factor
@@ -397,6 +466,28 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
         
         return 0
     
+    def LCDM_lambda_int_log_prior(hyperparameters):
+        """
+        Args:
+            hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
+                mu_gamma,sigma_gamma])
+        """
+
+        if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+            return -np.inf
+        if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+            return -np.inf
+        elif hyperparameters[2] < 0.5 or hyperparameters[2] > 1.5: #mu(lambda_int)
+            return -np.inf
+        elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.5: #sigma(lambda_int)
+            return -np.inf
+        elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5: #mu(gamma_lens)
+            return -np.inf
+        elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(gamma_lens)
+            return -np.inf
+        
+        return 0
+    
     def w0waCDM_log_prior(hyperparameters):
         """
         Args:
@@ -441,6 +532,18 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
 
             return cur_state
         
+        if cosmo_model == 'LCDM_lambda_int':
+            # order: [H0,Omega_M,mu_lambda_int,sigma_lambda_int,mu_gamma,sigma_gamma]
+            cur_state = np.empty((n_walkers,6))
+            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
+            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
+            cur_state[:,2] = uniform.rvs(loc=0.9,scale=0.2,size=n_walkers)
+            cur_state[:,3] = uniform.rvs(loc=0.001,scale=0.499,size=n_walkers)
+            cur_state[:,4] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
+            cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+
+            return cur_state
+        
         elif cosmo_model == 'w0waCDM':
             # order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
             cur_state = np.empty((n_walkers,6))
@@ -465,6 +568,8 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
         # Prior
         if cosmo_model == 'LCDM':
             lp = LCDM_log_prior(hyperparameters)
+        elif cosmo_model == 'LCDM_lambda_int':
+            lp = LCDM_lambda_int_log_prior(hyperparameters)
         elif cosmo_model == 'w0waCDM':
             lp = w0waCDM_log_prior(hyperparameters)
         # Likelihood

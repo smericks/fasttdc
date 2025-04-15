@@ -267,3 +267,21 @@ class TDCSamplerTests(unittest.TestCase):
         test_chain = tdc_sampler.fast_TDC([my_tdc,quads_tdc_lhood],
             num_emcee_samps=5,n_walkers=20)
         check_chain_moves(test_chain)
+
+
+        # Check that inclusion of lambda_int works
+        quad_kin_lklhd = tdc_sampler.TDCKinLikelihood(
+            self.td_measured_quads,self.td_prec_quads,
+            self.sigma_v_measured,self.sigma_v_likelihood_prec,
+            self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
+            self.kin_pred_samples,
+            z_lens=[0.6],z_src=[1.3],cosmo_model='LCDM_lambda_int')
+        
+        # check if it works, test_chain dims are: (walkers,samples,params)
+        test_chain = tdc_sampler.fast_TDC([quad_kin_lklhd],num_emcee_samps=5,
+            n_walkers=20)
+        check_chain_moves(test_chain)
+        
+
+        
+
