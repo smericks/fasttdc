@@ -17,8 +17,8 @@ import time
 # internally 
 class TDCLikelihood():
 
-    def __init__(self,td_measured_padded,td_likelihood_prec,td_likelihood_prefactors,
-        fpd_samples_padded,gamma_pred_samples,z_lens,z_src,
+    def __init__(self,td_measured,td_likelihood_prec,
+        fpd_samples,gamma_pred_samples,z_lens,z_src,
         log_prob_modeling_prior=None,cosmo_model='LCDM',
         use_gamma_info=True,use_astropy=False):
         """
@@ -26,16 +26,14 @@ class TDCLikelihood():
 
         Args: 
             td_measured_padded: array of td_measured, doubles padded w/ zeros 
-                (n_lenses,3)
+                doubles: (n_lenses,1)
+                quads: (n_lenses,3)
             td_likelihood_prec: array of precision matrices: 
-                - doubles: ((1/sigma^2 0 0 ),(0 0 0),(0 0 0 )
-                - quads: (1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2)
-            td_likelihood_prefactors:  array of log-space additive prefactors: 
-                log( (1/(2pi)^k/2) * 1/sqrt(det(Sigma)) )
-                - doubles: k=1,det(Sigma)=det([sigma^2])
-                - quads: k=3, det(Sigma)=det(Sigma)
-            fpd_samples_padded: array of fpd_samples, doubles padded w/ zeros
-                (n_lenses,n_fpd_samples,3)
+                - doubles: ((1/sigma^2))
+                - quads: ((1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2))
+            fpd_samples: array of fermat potential difference posterior samples
+                doubles: (n_lenses,n_fpd_samples,1)
+                quads: (n_lenses,n_fpd_samples,3)
             gamma_pred_samples (np.array(float)): 
                 gamma samples associated with each set of fpd samples.
                 (n_lenses,n_fpd_samples)
@@ -58,17 +56,20 @@ class TDCLikelihood():
         # make sure the dims are right
         self.gamma_pred_samples = gamma_pred_samples
         self.num_fpd_samples = len(gamma_pred_samples[0])
+        self.dim_fpd = fpd_samples.shape[2]
         
         # keep track internally
-        self.fpd_samples_padded = fpd_samples_padded
+        self.fpd_samples = fpd_samples
         # pad with a 2nd batch dim for # of fpd samples
-        self.td_measured_padded = np.repeat(td_measured_padded[:, np.newaxis, :],
-            self.num_fpd_samples, axis=1)
-        self.td_likelihood_prefactors = np.repeat(td_likelihood_prefactors[:, np.newaxis],
+        self.td_measured = np.repeat(td_measured[:, np.newaxis, :],
             self.num_fpd_samples, axis=1)
         self.td_likelihood_prec = np.repeat(td_likelihood_prec[:, np.newaxis, :, :],
             self.num_fpd_samples, axis=1)
-
+        # TODO: compute likelihood prefactors here instead of feeding them in...
+        # log( (1/(2pi)^k/2) * 1/sqrt(det(Sigma)) )
+        k_dim = self.dim_fpd
+        self.td_likelihood_prefactors = np.log( (1/(2*np.pi)**(k_dim/2)) / 
+            np.sqrt(np.linalg.det(np.linalg.inv(self.td_likelihood_prec))) )
 
         # TODO: fix hardcoding of this
         if log_prob_modeling_prior is None:
@@ -138,9 +139,9 @@ class TDCLikelihood():
         Ddt_repeated = np.repeat(Ddt_computed[:, np.newaxis],
             self.num_fpd_samples, axis=1)
         Ddt_repeated = np.repeat(Ddt_repeated[:,:, np.newaxis],
-            3, axis=2)
+            self.dim_fpd, axis=2)
         # compute predicted time delays (this function should work w/ arrays)
-        return tdc_utils.td_from_ddt_fpd(Ddt_repeated,self.fpd_samples_padded)
+        return tdc_utils.td_from_ddt_fpd(Ddt_repeated,self.fpd_samples)
 
     # TDC Likelihood per lens per fpd sample (only condense along num. images dim.)
     def td_log_likelihood_per_samp(self,td_pred_samples):
@@ -152,7 +153,7 @@ class TDCLikelihood():
             td_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
         """
 
-        x_minus_mu = (td_pred_samples-self.td_measured_padded)
+        x_minus_mu = (td_pred_samples-self.td_measured)
         # add batch dimension for # of time delays dim.
         x_minus_mu = np.expand_dims(x_minus_mu,axis=-1)
         # matmul should condense the (# of time delays) dim.
@@ -204,48 +205,11 @@ class TDCLikelihood():
 # TDC + Kin
 ############
 
+# TODO: implement this class
 class TDCKinLikelihood(TDCLikelihood):
 
-    def __init__(self,td_measured_padded,td_likelihood_prec,td_likelihood_prefactors,
-        fpd_samples_padded,gamma_pred_samples,jeans_mass_samples,z_lens,z_src,
-        log_prob_modeling_prior=None,cosmo_model='LCDM',
-        use_gamma_info=True,use_astropy=False):
-        """
-        Keep track of quantities that remain constant throughout the inference
-
-        Args: 
-            td_measured_padded: array of td_measured, doubles padded w/ zeros 
-                (n_lenses,3)
-            td_likelihood_prec: array of precision matrices: 
-                - doubles: ((1/sigma^2 0 0 ),(0 0 0),(0 0 0 )
-                - quads: (1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2)
-            td_likelihood_prefactors:  array of log-space additive prefactors: 
-                log( (1/(2pi)^k/2) * 1/sqrt(det(Sigma)) )
-                - doubles: k=1,det(Sigma)=det([sigma^2])
-                - quads: k=3, det(Sigma)=det(Sigma)
-            fpd_samples_padded: array of fpd_samples, doubles padded w/ zeros
-                (n_lenses,n_fpd_samples,3)
-            gamma_pred_samples (np.array(float)): 
-                gamma samples associated with each set of fpd samples.
-                (n_lenses,n_fpd_samples)
-            jeans_mass_samples ()
-            z_lens (np.array(float), size:(n_lenses)): lens redshifts
-            z_src (np.array(float), size:(n_lenses)): source redshifts
-            log_prob_modeling_prior: TODO
-            cosmo_model (string): 'LCDM' or 'w0waCDM'
-            use_gamma_info (bool): If False, removes reweighting from likelihood
-                evaluation (any population level gamma params should just 
-                return the prior then...)
-        """
-
-
-        super.__init__(td_measured_padded,td_likelihood_prec,td_likelihood_prefactors,
-            fpd_samples_padded,gamma_pred_samples,z_lens,z_src,
-            log_prob_modeling_prior,cosmo_model,
-            use_gamma_info,use_astropy)
-        
-        # TODO: initialize kinematics things
-        self.jeans_mass_samples = jeans_mass_samples
+    def __init__(self):
+        print("TODO!")
 
 
 
