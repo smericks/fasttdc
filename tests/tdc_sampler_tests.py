@@ -67,6 +67,10 @@ class TDCSamplerTests(unittest.TestCase):
             self.td_measured_dbls,self.td_prec_dbls,
             self.fpd_pred_samples_dbls,self.gamma_pred_samples_dbls,
             z_lens=[0.5],z_src=[1.2],cosmo_model='w0waCDM')
+        quad_lklhd_w0wa = tdc_sampler.TDCLikelihood(
+            self.td_measured_quads,self.td_prec_quads,
+            self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
+            z_lens=[0.6],z_src=[1.3],cosmo_model='w0waCDM')
         
         # FUNCTION 1: td_log_likelihood_per_samp
         td_pred_samples = dbl_lklhd.fpd_samples*1.2
@@ -153,7 +157,7 @@ class TDCSamplerTests(unittest.TestCase):
         # LCDM case
         likelihood_test_case(dbl_lklhd,quad_lklhd,hyperparameters = [70.,0.3,2.0,0.2])
         # w0waCDM case
-        #likelihood_test_case(my_w0wa_tdc,hyperparameters=[70,0.3,-1.,0.,2.0,0.2])
+        likelihood_test_case(dbl_lklhd_w0wa,quad_lklhd_w0wa,hyperparameters=[70,0.3,-1.,0.,2.0,0.2])
 
 
     def test_fast_tdc(self):
