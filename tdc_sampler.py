@@ -263,7 +263,7 @@ class TDCLikelihood():
     
     @staticmethod
     def ddt_posterior_from_td_fpd(td_measured,td_likelihood_prec,fpd_samples,
-            num_emcee_samps=1000):
+            num_emcee_samps=10000):
         """Computes ddt posterior from measured time delay(s) and 
             samples from fermat potential difference posterior(s)
             for a SINGLE lens
@@ -328,7 +328,6 @@ class TDCLikelihood():
 
         # return chain
         return sampler.get_chain()
-
 
 
 ############
