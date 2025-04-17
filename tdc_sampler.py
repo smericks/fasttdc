@@ -2,7 +2,7 @@ import jax_cosmo
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-from scipy.stats import norm, truncnorm, uniform, gaussian_kde
+from scipy.stats import norm, truncnorm, uniform, multivariate_normal, gaussian_kde
 from astropy.cosmology import w0waCDM
 import tdc_utils
 import emcee
@@ -260,6 +260,76 @@ class TDCLikelihood():
         log_likelihood = np.sum(np.log(individ_likelihood))
 
         return log_likelihood
+    
+    @staticmethod
+    def ddt_posterior_from_td_fpd(td_measured,td_likelihood_prec,fpd_samples,
+            num_emcee_samps=1000):
+        """Computes ddt posterior from measured time delay(s) and 
+            samples from fermat potential difference posterior(s)
+            for a SINGLE lens
+
+        The inference: 
+            p(Ddt | delta_t, d_img) /propto p(Ddt) /integral [ 
+                p(delta_t | delta_phi, Ddt) p( delta_phi | d_img, nu_int) 
+                p(delta_phi) / p(delta_phi | nu_int) d delta_phi   ]
+
+        Args: 
+            td_measured ([n_td])
+            td_likelihood_prec ([n_td,n_td])
+            fpd_samples ([n_importance_samples,n_td])
+        
+        Returns: 
+            emcee.EnsembleSampler.get_chain()
+        """
+
+        # set up variables here
+        n_td = len(td_measured)
+        n_walkers = 10
+        td_likelihood_prefactor = np.log( (1/(2*np.pi)**(n_td/2)) / 
+            np.sqrt(np.linalg.det(np.linalg.inv(td_likelihood_prec))) )
+
+        def td_log_likelihood(Ddt_proposed):
+            
+            # TODO: check dimensions heres
+            td_predicted = tdc_utils.td_from_ddt_fpd(Ddt_proposed,fpd_samples)
+
+            x_minus_mu = (td_predicted-td_measured)
+            # add dimension s.t. x_minus_mu is 2D
+            x_minus_mu = np.expand_dims(x_minus_mu,axis=-1)
+            # matmul should condense the (# of time delays) dim.
+            # TODO: probably only 3 dimensions here? check...
+            exponent = -0.5*np.matmul(np.transpose(x_minus_mu,axes=(0,2,1)),
+                np.matmul(td_likelihood_prec,x_minus_mu))
+
+            # reduce to one dimension: (n_fpd_samples)
+            exponent = np.squeeze(exponent)
+
+            imp_samp_likelihood = np.mean(np.exp(td_likelihood_prefactor+exponent))
+
+            return np.log(imp_samp_likelihood)
+        
+        def td_log_posterior(Ddt_proposed):
+
+            # what's a good prior for Ddt?
+            if Ddt_proposed < 0. or Ddt_proposed > 15000:
+                return -np.inf
+            else:
+                return td_log_likelihood(Ddt_proposed)
+
+
+        # set-up emcee sampler
+        cur_state = np.empty((n_walkers,1))
+        cur_state[:,0] = uniform.rvs(loc=0.,scale=15000.,size=n_walkers) 
+        sampler = emcee.EnsembleSampler(n_walkers,
+            cur_state.shape[1],td_log_posterior)
+
+        # run mcmc
+        _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
+
+        # return chain
+        return sampler.get_chain()
+
+
 
 ############
 # TDC + Kin

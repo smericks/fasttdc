@@ -1,9 +1,12 @@
 import unittest
 import numpy as np
+import jax.numpy as jnp
 import sys
+import jax_cosmo
+from scipy.stats import norm,multivariate_normal,uniform
 sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/')
 import tdc_sampler
-from scipy.stats import norm,multivariate_normal,uniform
+import tdc_utils
 
 class TDCSamplerTests(unittest.TestCase):
 
@@ -283,5 +286,41 @@ class TDCSamplerTests(unittest.TestCase):
         check_chain_moves(test_chain)
         
 
+    def test_ddt_posteriors_from_fpd_td(self):
+
+        # set up something where we know the ground truth
+        z_lens = 0.598
+        z_src = 1.7982546
+        fpd_truth = [ -0.03878689524637091, -0.11086611144147474, -0.12145087695149426]
+        td_truth = [ -4.355989563838178, -12.450896658648382, -13.639626197438508]
+        # Ground Truth Cosmology
+        gt_cosmo = jax_cosmo.Cosmology(h=jnp.float32(70./100),
+                        Omega_c=jnp.float32(0.3-0.05), # "cold dark matter fraction", OmegaM = 0.3
+                        Omega_b=jnp.float32(0.05), # "baryonic fraction"
+                        Omega_k=jnp.float32(0.),
+                        w0=jnp.float32(-1.),
+                        wa=jnp.float32(0.),
+                        sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
+        Ddt_truth = tdc_utils.jax_ddt_from_redshifts(gt_cosmo,z_lens,z_src)
+
+        fpd_samps = multivariate_normal.rvs(mean=fpd_truth,
+            cov=(0.02**2)*np.eye(3),size=5000) # 0.02 measurement error
+        
+
+        ddt_chain = tdc_sampler.TDCLikelihood.ddt_posterior_from_td_fpd(
+            td_measured=td_truth,
+            td_likelihood_prec=np.eye(3)*(1/4.), # 2-day measurement error
+            fpd_samples=fpd_samps,
+            num_emcee_samps=10000
+        )
+
+        # Stack and condense the walker dimension of ddt_chain
+        ddt_chain_stacked = np.reshape(ddt_chain[1000:], (-1, ddt_chain.shape[-1]))
+        
+        # TODO
+        ddt_chain_mean = np.mean(ddt_chain_stacked)
+        ddt_chain_sigma = np.std(ddt_chain_stacked,ddof=1)
+        print('Predicted ddt: ', ddt_chain_mean, ' +/- ', ddt_chain_sigma)
+        print("True ddt: ", Ddt_truth)
         
 
