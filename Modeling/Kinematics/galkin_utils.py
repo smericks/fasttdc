@@ -4,7 +4,7 @@ import h5py
 from scipy.stats import truncnorm
 from lenstronomy.Analysis.kinematics_api import KinematicsAPI
 import sys
-sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/')
+sys.path.insert(0, '/scratch/users/sydney3/forecast/darkenergy-from-LAGN/')
 import Utils.tdc_utils as tdc_utils
 
 # hard-coded assumptions for 4MOST
