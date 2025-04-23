@@ -6,8 +6,12 @@ import galkin_utils # requires lenstronomy
 
 # HARDCODINGS HERE:
 LENS_IDX = 0
-h5_posteriors_file = 'DataVectors/gold/quad_posteriors.h5'
-truth_df = pd.read_csv('DataVectors/gold/truth_metadata.csv')
+
+# NOTE: hardcoded for gold quads!!
+h5_posteriors_file = ('/scratch/users/sydney3/forecast/darkenergy-from-LAGN/'+
+    'Experiments/lsst_forecast/DataVectors/gold/quad_posteriors.h5')
+truth_df = pd.read_csv('/scratch/users/sydney3/forecast/darkenergy-from-LAGN/'+
+    'Experiments/lsst_forecast/DataVectors/gold/truth_metadata.csv')
 
 
 # read in fpd samps, lens_param_samps, beta_ani_samps
