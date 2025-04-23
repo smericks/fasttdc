@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import norm, truncnorm, uniform, multivariate_normal, gaussian_kde
 from astropy.cosmology import w0waCDM
-import tdc_utils
+import Utils.tdc_utils as tdc_utils
 import emcee
 import time
 

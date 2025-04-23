@@ -6,7 +6,7 @@ import jax_cosmo
 from scipy.stats import norm,multivariate_normal,uniform
 sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/')
 import tdc_sampler
-import tdc_utils
+import Utils.tdc_utils as tdc_utils
 
 class TDCSamplerTests(unittest.TestCase):
 
