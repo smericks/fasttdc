@@ -2,7 +2,7 @@ import jax_cosmo
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
-from scipy.stats import norm, truncnorm, uniform, multivariate_normal, gaussian_kde
+from scipy.stats import norm, truncnorm, uniform, multivariate_normal
 from astropy.cosmology import w0waCDM
 import Utils.tdc_utils as tdc_utils
 import emcee
@@ -27,7 +27,7 @@ class TDCLikelihood():
 
     def __init__(self,td_measured,td_likelihood_prec,
         fpd_samples,gamma_pred_samples,z_lens,z_src,
-        log_prob_modeling_prior=None,cosmo_model='LCDM',
+        log_prob_gamma_nu_int=None,cosmo_model='LCDM',
         use_gamma_info=True,use_astropy=False):
         """
         Keep track of quantities that remain constant throughout the inference
@@ -47,7 +47,8 @@ class TDCLikelihood():
                 (n_lenses,n_fpd_samples)
             z_lens (np.array(float), size:(n_lenses)): lens redshifts
             z_src (np.array(float), size:(n_lenses)): source redshifts
-            log_prob_modeling_prior: TODO
+            log_prob_gamma_nu_int (callable): function that produces logpdf(values)
+                for the modeling prior on gamma_lens (also called nu_int)
             cosmo_model (string): 'LCDM' or 'w0waCDM'
             use_gamma_info (bool): If False, removes reweighting from likelihood
                 evaluation (any population level gamma params should just 
@@ -84,16 +85,13 @@ class TDCLikelihood():
             np.sqrt(np.linalg.det(np.linalg.inv(self.td_likelihood_prec))) )
 
         # TODO: fix hardcoding of this
-        if log_prob_modeling_prior is None:
+        if log_prob_gamma_nu_int is None:
             self.log_prob_modeling_prior = uniform.logpdf(gamma_pred_samples,loc=1.,scale=2.)
             #self.log_prob_modeling_prior = norm.logpdf(gamma_pred_samples,loc=2.,scale=0.2)
         else:
-            hst_train0 = pd.read_csv(r'/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/MassModels/hst_train0_metadata.csv')
-            gamma_vals = hst_train0['main_deflector_parameters_gamma'].to_numpy().astype(float)
-            gamma_kde = gaussian_kde(gamma_vals)
             self.log_prob_modeling_prior = np.empty((gamma_pred_samples.shape))
             for i in range(0,gamma_pred_samples.shape[0]):
-                self.log_prob_modeling_prior[i,:] = gamma_kde.logpdf(gamma_pred_samples[i])
+                self.log_prob_modeling_prior[i,:] = log_prob_gamma_nu_int(gamma_pred_samples[i])
 
     # compute predicted time delays from predicted fermat potential differences
     # requires an assumed cosmology (from hyperparameters) and redshifts
@@ -340,7 +338,7 @@ class TDCKinLikelihood(TDCLikelihood):
     def __init__(self,td_measured,td_likelihood_prec,
         sigma_v_measured,sigma_v_likelihood_prec,
         fpd_samples,gamma_pred_samples,kin_pred_samples,z_lens,z_src,
-        log_prob_modeling_prior=None,cosmo_model='LCDM',use_gamma_info=True,
+        log_prob_gamma_nu_int=None,cosmo_model='LCDM',use_gamma_info=True,
         use_astropy=False):
         """
         Keep track of quantities that remain constant throughout the inference
@@ -371,7 +369,7 @@ class TDCKinLikelihood(TDCLikelihood):
                 size of array: (n_lenses,n_fpd_samples,num_kin_bins)
             z_lens (np.array(float), size:(n_lenses)): lens redshifts
             z_src (np.array(float), size:(n_lenses)): source redshifts
-            log_prob_modeling_prior: TODO
+            log_prob_gamma_nu_int: TODO
             cosmo_model (string): 'LCDM' or 'w0waCDM'
             use_gamma_info (bool): If False, removes reweighting from likelihood
                 evaluation (any population level gamma params should just 
@@ -380,7 +378,7 @@ class TDCKinLikelihood(TDCLikelihood):
 
         super().__init__(td_measured,td_likelihood_prec,fpd_samples,
             gamma_pred_samples,z_lens,z_src,
-            log_prob_modeling_prior,cosmo_model,use_gamma_info,
+            log_prob_gamma_nu_int,cosmo_model,use_gamma_info,
             use_astropy)
 
         # track kinematic information
@@ -399,7 +397,7 @@ class TDCKinLikelihood(TDCLikelihood):
             np.sqrt(np.linalg.det(np.linalg.inv(self.sigma_v_likelihood_prec))))
         
 
-    
+    #@partial(jit, static_argnums=(3,)) (re-compiles for every different value of argument index 3)
     def sigma_v_pred_from_kin_pred(self,proposed_cosmo,lambda_int_samples=None):
         """
         Args:
