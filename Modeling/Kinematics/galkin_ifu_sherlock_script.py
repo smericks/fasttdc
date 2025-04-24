@@ -68,13 +68,14 @@ def main(args):
     with FileLock(h5_posteriors_file + ".lock"):
         h5 = h5py.File(h5_posteriors_file, 'r+')
         # TODO fix this!!!
-        h5['MUSE_c_sqrtJ_samps'][LENS_IDX, ...] = c_sqrtJ_samps
+        h5['MUSE_c_sqrtJ_samps'][LENS_IDX, ...] = MUSE_c_sqrtJ_samps
+        h5['NIRSPEC_c_sqrtJ_samps'][LENS_IDX, ...] = NIRSPEC_c_sqrtJ_samps
         h5.close()
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(
-        description="Computes c_sqrtJ samples for one lens"
+        description="Computes IFU binned c_sqrtJ samples for one lens"
     )
     parser.add_argument(
         "--lens_idx",
