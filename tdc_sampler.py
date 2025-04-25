@@ -893,10 +893,10 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
             if not pool.is_master():
                 pool.wait()
                 sys.exit(0)
-            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior)
+            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior, pool=pool)
             # run mcmc
             tik_mcmc = time.time()
-            _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False, pool=pool)
+            _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
             tok_mcmc = time.time()
             print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
         
