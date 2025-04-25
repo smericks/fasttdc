@@ -64,6 +64,32 @@ class TDCSamplerTests(unittest.TestCase):
             [[120.],[140.],[150.],[100.],[110.]]
         ])
 
+        # ifu kinematics
+        self.ifu_sigma_v_measured = np.asarray([
+            [150., 155., 160.]
+        ])
+
+        self.ifu_sigma_v_likelihood_prec = np.asarray([
+            [[1/25., 0., 0.],
+             [0., 1/25., 0.],
+             [0., 0., 1/25.]
+            ]
+        ])
+
+        self.ifu_sigma_v_pred_samples = np.asarray([
+            [[160., 160., 160.],
+             [150., 140., 170.],
+             [151., 156., 161.],
+             [149., 154., 159.],
+             [158., 155., 170.]]
+        ])
+
+        self.beta_ani_samples = np.asarray([
+            [0.1,-0.1,0.05,-0.05,0.]
+        ])
+
+
+
     def test_tdclikelihood(self):
 
         # make TDCLikelihood object
@@ -233,6 +259,14 @@ class TDCSamplerTests(unittest.TestCase):
 
         self.assertAlmostEqual(lens1_computed_ll,np.log(lens1_likelihood))
         
+    def _check_chain_moves(self,mcmc_chain):
+        # loop over params, check that chain is moving
+        for param_idx in range(0,mcmc_chain.shape[2]):
+            # isolate a single walker
+            single_chain = mcmc_chain[0,:,param_idx]
+            # check if chain has moved away from starting point
+            diff_from_initial = single_chain[1:] - single_chain[0]
+            self.assertNotAlmostEqual(0.,np.sum(diff_from_initial) )    
 
     def test_fast_tdc(self):
 
@@ -243,21 +277,12 @@ class TDCSamplerTests(unittest.TestCase):
             self.td_measured_dbls,self.td_prec_dbls,
             self.fpd_pred_samples_dbls,self.gamma_pred_samples_dbls,
             z_lens=[0.5],z_src=[1.2])
-        
-        def check_chain_moves(mcmc_chain):
-            # loop over params, check that chain is moving
-            for param_idx in range(0,mcmc_chain.shape[2]):
-                # isolate a single walker
-                single_chain = mcmc_chain[0,:,param_idx]
-                # check if chain has moved away from starting point
-                diff_from_initial = single_chain[1:] - single_chain[0]
-                self.assertNotAlmostEqual(0.,np.sum(diff_from_initial) )
 
 
         # check if it works, test_chain dims are: (walkers,samples,params)
         test_chain = tdc_sampler.fast_TDC([my_tdc],num_emcee_samps=5,
             n_walkers=20)
-        check_chain_moves(test_chain)
+        self._check_chain_moves(test_chain)
 
 
         # Combine doubles and quads, check it works...
@@ -269,7 +294,7 @@ class TDCSamplerTests(unittest.TestCase):
         # check if it works, test_chain dims are: (walkers,samples,params)
         test_chain = tdc_sampler.fast_TDC([my_tdc,quads_tdc_lhood],
             num_emcee_samps=5,n_walkers=20)
-        check_chain_moves(test_chain)
+        self._check_chain_moves(test_chain)
 
 
         # Check that inclusion of lambda_int works
@@ -283,8 +308,26 @@ class TDCSamplerTests(unittest.TestCase):
         # check if it works, test_chain dims are: (walkers,samples,params)
         test_chain = tdc_sampler.fast_TDC([quad_kin_lklhd],num_emcee_samps=5,
             n_walkers=20)
-        check_chain_moves(test_chain)
-        
+        self._check_chain_moves(test_chain)
+
+    def test_fast_tdc_ifu(self):
+
+        # construct a beta_ani modeling prior
+        beta_ani_nu_int = norm(loc=0.,scale=0.2).logpdf
+
+        # Check that inclusion of beta_ani works
+        ifu_quad_lklhd = tdc_sampler.TDCKinLikelihood(
+            self.td_measured_quads,self.td_prec_quads,
+            self.ifu_sigma_v_measured,self.ifu_sigma_v_likelihood_prec,
+            self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
+            self.ifu_sigma_v_pred_samples,
+            beta_ani_samples=self.beta_ani_samples,
+            log_prob_beta_ani_nu_int=beta_ani_nu_int,
+            z_lens=[0.6],z_src=[1.3],cosmo_model='LCDM_lambda_int_beta_ani')
+
+        test_chain = tdc_sampler.fast_TDC([ifu_quad_lklhd],num_emcee_samps=5,
+            n_walkers=20)
+        self._check_chain_moves(test_chain)        
 
     def test_ddt_posteriors_from_fpd_td(self):
 

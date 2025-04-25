@@ -59,9 +59,10 @@ class TDCLikelihood():
         #    are removed)
         self.z_lens = np.squeeze(np.asarray(z_lens))
         self.z_src = np.squeeze(np.asarray(z_src))
-        if cosmo_model not in ['LCDM','LCDM_lambda_int','w0waCDM']:
+        if cosmo_model not in ['LCDM','LCDM_lambda_int',
+            'LCDM_lambda_int_beta_ani','w0waCDM']:
             raise ValueError("choose from available cosmo_models: "+
-                "LCDM, LCDM_lambda_int, w0waCDM")
+                "LCDM, LCDM_lambda_int, LCDM_lambda_int_beta_ani, w0waCDM")
         self.cosmo_model = cosmo_model
         self.use_gamma_info = use_gamma_info
         self.use_astropy = use_astropy
@@ -169,7 +170,8 @@ class TDCLikelihood():
         omega_m_input = hyperparameters[1]
         omega_c_input = hyperparameters[1] - 0.05 # CDM fraction
         omega_de_input = 1. - omega_m_input
-        if self.cosmo_model in ['LCDM','LCDM_lambda_int'] :
+        if self.cosmo_model in ['LCDM','LCDM_lambda_int',
+         'LCDM_lambda_int_beta_ani'] :
              w0_input = -1.
              wa_input = 0.
         elif self.cosmo_model == 'w0waCDM':
@@ -211,11 +213,18 @@ class TDCLikelihood():
 
         # importance sampling over lambda_int based on proposal distribution
         lambda_int_samples = None
+        mu_lint = None
         if self.cosmo_model == 'LCDM_lambda_int':
             # NOTE: hardcoding of hyperparameter order!! (-4 is mu, -3 is sigma)
             mu_lint = hyperparameters[-4]
             sigma_lint = hyperparameters[-3]
+        elif self.cosmo_model == 'LCDM_lambda_int_beta_ani':
+            # NOTE: hardcoding of hyperparameter order!! (-6 is mu, -5 is sigma)
+            mu_lint = hyperparameters[-6]
+            sigma_lint = hyperparameters[-5]
             # truncating to avoid values below 0 (unphysical)
+
+        if mu_lint is not None:
             lambda_int_samples = truncnorm.rvs(-mu_lint/sigma_lint,np.inf,
                 loc=mu_lint,scale=sigma_lint,
                 size=(self.num_lenses,self.num_fpd_samples))
@@ -339,6 +348,7 @@ class TDCKinLikelihood(TDCLikelihood):
         sigma_v_measured,sigma_v_likelihood_prec,
         fpd_samples,gamma_pred_samples,kin_pred_samples,z_lens,z_src,
         log_prob_gamma_nu_int=None,cosmo_model='LCDM',use_gamma_info=True,
+        beta_ani_samples=None,log_prob_beta_ani_nu_int=None,
         use_astropy=False):
         """
         Keep track of quantities that remain constant throughout the inference
@@ -370,10 +380,14 @@ class TDCKinLikelihood(TDCLikelihood):
             z_lens (np.array(float), size:(n_lenses)): lens redshifts
             z_src (np.array(float), size:(n_lenses)): source redshifts
             log_prob_gamma_nu_int: TODO
-            cosmo_model (string): 'LCDM' or 'w0waCDM'
+            cosmo_model (string): 'LCDM', 'w0waCDM', 'LCDM_lambda_int', or 
+                'LCDM_lambda_int_beta_ani'
             use_gamma_info (bool): If False, removes reweighting from likelihood
                 evaluation (any population level gamma params should just 
                 return the prior then...)
+            beta_ani_samples (): None if beta_ani not in population model
+                (n_lenses,n_fpd_samples)
+            log_prob_beta_ani_nu_int: TODO
         """
 
         super().__init__(td_measured,td_likelihood_prec,fpd_samples,
@@ -395,6 +409,26 @@ class TDCKinLikelihood(TDCLikelihood):
         k_dim = self.num_kin_bins
         self.sigma_v_likelihood_prefactors = np.log( (1/(2*np.pi)**(k_dim/2)) / 
             np.sqrt(np.linalg.det(np.linalg.inv(self.sigma_v_likelihood_prec))))
+        
+        # TODO
+        if cosmo_model == 'LCDM_lambda_int_beta_ani':
+            # check that beta_ani_samples are provided...
+            if beta_ani_samples is None:
+                raise ValueError('Must provide beta_ani_samples if using '+
+                    'cosmo_model LCDM_lambda_int_beta_ani')
+            
+            self.beta_ani_samples = beta_ani_samples
+            # handle beta_ani hierarchically
+            if log_prob_beta_ani_nu_int is None:
+                # default: assume un-informative prior
+                self.log_prob_beta_ani_nu_int = uniform.logpdf(
+                    beta_ani_samples,loc=-0.5,scale=1.)
+            else:
+                # user-provided modeling prior
+                self.log_prob_beta_ani_nu_int = np.empty((beta_ani_samples.shape))
+                for i in range(0,beta_ani_samples.shape[0]):
+                    self.log_prob_beta_ani_nu_int[i,:] = log_prob_beta_ani_nu_int(
+                        beta_ani_samples[i])
         
 
     #@partial(jit, static_argnums=(3,)) (re-compiles for every different value of argument index 3)
@@ -479,6 +513,12 @@ class TDCKinLikelihood(TDCLikelihood):
         else:
             rw_factor = 0.
 
+        if self.cosmo_model == 'LCDM_lambda_int_beta_ani':
+            eval_at_proposed_beta_pop = norm.logpdf(self.beta_ani_samples,
+                loc=hyperparameters[-4],scale=hyperparameters[-3])
+            beta_rw_factor = eval_at_proposed_beta_pop - self.log_prob_beta_ani_nu_int
+            rw_factor += beta_rw_factor
+
         # sum across fpd samples 
         individ_likelihood = np.mean(
             np.exp(td_log_likelihoods+sigma_v_log_likelihoods+rw_factor),
@@ -555,6 +595,32 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
         
         return 0
     
+    def LCDM_lambda_int_beta_ani_log_prior(hyperparameters):
+        """
+        Args:
+            hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
+                mu_gamma,sigma_gamma])
+        """
+
+        if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+            return -np.inf
+        if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+            return -np.inf
+        elif hyperparameters[2] < 0.5 or hyperparameters[2] > 1.5: #mu(lambda_int)
+            return -np.inf
+        elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.5: #sigma(lambda_int)
+            return -np.inf
+        elif hyperparameters[4] < -0.5 or hyperparameters[4] > 0.5: #mu(beta_ani)
+            return -np.inf
+        elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(beta_ani)
+            return -np.inf
+        elif hyperparameters[6] < 1.5 or hyperparameters[4] > 2.5: #mu(gamma_lens)
+            return -np.inf
+        elif hyperparameters[7] < 0.001 or hyperparameters[5] > 0.2: #sigma(gamma_lens)
+            return -np.inf
+        
+        return 0
+    
     def w0waCDM_log_prior(hyperparameters):
         """
         Args:
@@ -611,6 +677,21 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
 
             return cur_state
         
+        if cosmo_model == 'LCDM_lambda_int_beta_ani':
+            # order: [H0,Omega_M,mu_lambda_int,sigma_lambda_int,
+            #   mu_beta_ani,sigma_beta_ani,mu_gamma,sigma_gamma]
+            cur_state = np.empty((n_walkers,8))
+            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
+            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
+            cur_state[:,2] = uniform.rvs(loc=0.9,scale=0.2,size=n_walkers)
+            cur_state[:,3] = uniform.rvs(loc=0.001,scale=0.499,size=n_walkers)
+            cur_state[:,4] = uniform.rvs(loc=-0.1,scale=0.2,size=n_walkers)
+            cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+            cur_state[:,6] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
+            cur_state[:,7] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+
+            return cur_state
+        
         elif cosmo_model == 'w0waCDM':
             # order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
             cur_state = np.empty((n_walkers,6))
@@ -630,6 +711,8 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
         Args:
             hyperparameters ([float]): 
                 - LCDM: [H0,Omega_M,mu_gamma,sigma_gamma] 
+                - LCDM_lambda_int_beta_ani: [H0,Omega_M,
+                    mu_lint,sigma_lint,mu_bani,sigma_bani,mu_gamma,sigma_gamma] 
                 - w0waCDM: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
         """
         # Prior
@@ -637,6 +720,8 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
             lp = LCDM_log_prior(hyperparameters)
         elif cosmo_model == 'LCDM_lambda_int':
             lp = LCDM_lambda_int_log_prior(hyperparameters)
+        elif cosmo_model == 'LCDM_lambda_int_beta_ani':
+            lp = LCDM_lambda_int_beta_ani_log_prior(hyperparameters)
         elif cosmo_model == 'w0waCDM':
             lp = w0waCDM_log_prior(hyperparameters)
         # Likelihood
