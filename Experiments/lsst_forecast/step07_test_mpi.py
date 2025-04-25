@@ -7,6 +7,7 @@ from matplotlib.lines import Line2D
 import sys
 sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/')
 import tdc_sampler
+import time
 
 
 # USER SETTINGS HERE (TODO: change filepaths)
@@ -244,6 +245,9 @@ quad_kin_lklhd_kappa_ext = tdc_sampler.TDCKinLikelihood(
 ###################
 # RUN MCMC HERE!!!
 ###################
+start = time.time()
 tenIFU_chain = tdc_sampler.fast_TDC([quad_kin_lklhd_kappa_ext],num_emcee_samps=NUM_EMCEE_SAMPS,
     n_walkers=20)
+end = time.time()
+print('Time to run MCMC:',end-start)
 
