@@ -130,3 +130,44 @@ def populate_truth_sigma_v_4MOST(metadata_df,gt_cosmo_astropy):
             gt_cosmo_astropy)
         # write in the value!
         metadata_df.loc[r,'sigma_v_4MOST_kmpersec'] = sigma_v
+
+
+def populate_truth_sigma_v_IFU(metadata_df,gt_cosmo_astropy):
+    """Using ground truth lens properties + a ground truth cosmology, computes
+        the velocity dispersion in bins of MUSE and JWST NIRSPEC
+
+    Returns:
+        modifies metadata_df in place
+    """
+
+    for r in range(0,len(metadata_df)):
+
+        # compute MUSE kin
+        sigma_v_muse = galkin_utils.ground_truth_ifu_vdisp(
+            galkin_utils.kinematicsAPI_MUSE,
+            metadata_df.loc[r,'main_deflector_parameters_theta_E'],
+            metadata_df.loc[r,'main_deflector_parameters_gamma'],
+            metadata_df.loc[r,'lens_light_parameters_R_sersic'],
+            metadata_df.loc[r,'lens_light_parameters_n_sersic'],
+            metadata_df.loc[r,'main_deflector_parameters_z_lens'],
+            metadata_df.loc[r,'source_parameters_z_source'],
+            gt_cosmo_astropy
+        )
+        # write in the value!
+        for b in range(0,len(sigma_v_muse)):
+            metadata_df.loc[r,'sigma_v_MUSE_bin%d_kmpersec'%(b)] = sigma_v_muse[b]
+
+        # compute NIRSPEC kin
+        sigma_v_nirspec = galkin_utils.ground_truth_ifu_vdisp(
+            galkin_utils.kinematicsAPI_NIRSPEC,
+            metadata_df.loc[r,'main_deflector_parameters_theta_E'],
+            metadata_df.loc[r,'main_deflector_parameters_gamma'],
+            metadata_df.loc[r,'lens_light_parameters_R_sersic'],
+            metadata_df.loc[r,'lens_light_parameters_n_sersic'],
+            metadata_df.loc[r,'main_deflector_parameters_z_lens'],
+            metadata_df.loc[r,'source_parameters_z_source'],
+            gt_cosmo_astropy
+        )
+        # write in the value!
+        for b in range(0,len(sigma_v_nirspec)):
+            metadata_df.loc[r,'sigma_v_NIRSPEC_bin%d_kmpersec'%(b)] = sigma_v_nirspec[b]

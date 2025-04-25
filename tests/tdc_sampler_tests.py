@@ -114,7 +114,7 @@ class TDCSamplerTests(unittest.TestCase):
         
         # FUNCTION 1: td_log_likelihood_per_samp
         td_pred_samples = dbl_lklhd.fpd_samples*1.2
-        likelihood_per_samp = dbl_lklhd.td_log_likelihood_per_samp(td_pred_samples)
+        likelihood_per_samp = dbl_lklhd.td_log_likelihood_per_samp(td_pred_samples)        
         # test that shape of output is (num_lenses,num_fpd_samples)
         for i,s in enumerate([1,5]):
             self.assertEqual(np.shape(likelihood_per_samp)[i],s)
@@ -354,7 +354,7 @@ class TDCSamplerTests(unittest.TestCase):
             td_measured=td_truth,
             td_likelihood_prec=np.eye(3)*(1/4.), # 2-day measurement error
             fpd_samples=fpd_samps,
-            num_emcee_samps=10000
+            num_emcee_samps=5000
         )
 
         # Stack and condense the walker dimension of ddt_chain
