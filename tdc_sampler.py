@@ -887,6 +887,7 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
         tok_mcmc = time.time()
         print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
     else: 
+        print("Using MPI for parallelization...")
         from schwimmbad import MPIPool
         with MPIPool() as pool:
             if not pool.is_master():
