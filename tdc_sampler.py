@@ -9,6 +9,8 @@ import Utils.tdc_utils as tdc_utils
 import emcee
 import time
 
+# flag for whether to use jax or not
+USE_JAX = False
 
 """
 cosmo_models available: 
@@ -28,6 +30,7 @@ class TDCLikelihood():
 
     def __init__(self,td_measured,td_likelihood_prec,
         fpd_samples,gamma_pred_samples,z_lens,z_src,
+        kappa_ext_samples=None,
         log_prob_gamma_nu_int=None,cosmo_model='LCDM',
         use_gamma_info=True,use_astropy=False):
         """
@@ -48,6 +51,8 @@ class TDCLikelihood():
                 (n_lenses,n_fpd_samples)
             z_lens (np.array(float), size:(n_lenses)): lens redshifts
             z_src (np.array(float), size:(n_lenses)): source redshifts
+            kappa_ext_samples (np.array(float), size:(n_lenses,n_fpd_samples)):
+                default is None (kappa_ext not considered)
             log_prob_gamma_nu_int (callable): function that produces logpdf(values)
                 for the modeling prior on gamma_lens (also called nu_int)
             cosmo_model (string): 'LCDM' or 'w0waCDM'
@@ -75,6 +80,8 @@ class TDCLikelihood():
         # keep track internally
         self.gamma_pred_samples = gamma_pred_samples
         self.fpd_samples = fpd_samples
+        self.kappa_ext_samples = kappa_ext_samples
+
         # pad with a 2nd batch dim for # of fpd samples
         self.td_measured = np.repeat(td_measured[:, np.newaxis, :],
             self.num_fpd_samples, axis=1)
@@ -124,11 +131,20 @@ class TDCLikelihood():
         # compute predicted time delays (this function should work w/ arrays)
         td_pred = tdc_utils.td_from_ddt_fpd(Ddt_repeated,self.fpd_samples)
         
+        # Account for mass sheets: 
+        #   td = lambda * td
+        #   lambda = (1-kappa_ext)*lambda_int
+
         # Linear scaling if lambda_int is present
         if lambda_int_samples is not None:
             lambda_int_repeated = np.repeat(lambda_int_samples[:,:,np.newaxis],
                 self.dim_fpd, axis=2)
             td_pred *= lambda_int_repeated
+        # Scaling if kappa_ext is present...
+        if self.kappa_ext_samples is not None:
+            kappa_ext_repeated = np.repeat(self.kappa_ext_samples[:,:,np.newaxis],
+                self.dim_fpd, axis=2)
+            td_pred *= (1-kappa_ext_repeated)
 
         return td_pred
 
@@ -277,11 +293,16 @@ class TDCLikelihood():
         td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo,
             lambda_int_samples)
         # TODO test jitting this
-        td_log_likelihoods = self.jax_td_log_likelihood_per_samp(
-            jnp.asarray(td_pred_samples),jnp.asarray(self.td_measured),
-            jnp.asarray(self.td_likelihood_prec),
-            jnp.asarray(self.td_likelihood_prefactors))
-        td_log_likelihoods = np.asarray(td_log_likelihoods)
+        if USE_JAX:
+            td_log_likelihoods = self.jax_td_log_likelihood_per_samp(
+                jnp.asarray(td_pred_samples),jnp.asarray(self.td_measured),
+                jnp.asarray(self.td_likelihood_prec),
+                jnp.asarray(self.td_likelihood_prefactors))
+            td_log_likelihoods = np.asarray(td_log_likelihoods)
+        else:
+            td_log_likelihoods = self.td_log_likelihood_per_samp(
+                td_pred_samples
+            )
 
         # reweighting factor
         # NOTE: hardcoding of hyperparameter order!! (-2 is mu, -1 is sigma)
@@ -382,6 +403,7 @@ class TDCKinLikelihood(TDCLikelihood):
     def __init__(self,td_measured,td_likelihood_prec,
         sigma_v_measured,sigma_v_likelihood_prec,
         fpd_samples,gamma_pred_samples,kin_pred_samples,z_lens,z_src,
+        kappa_ext_samples=None,
         log_prob_gamma_nu_int=None,cosmo_model='LCDM',use_gamma_info=True,
         beta_ani_samples=None,log_prob_beta_ani_nu_int=None,
         use_astropy=False):
@@ -426,7 +448,7 @@ class TDCKinLikelihood(TDCLikelihood):
         """
 
         super().__init__(td_measured,td_likelihood_prec,fpd_samples,
-            gamma_pred_samples,z_lens,z_src,
+            gamma_pred_samples,z_lens,z_src,kappa_ext_samples,
             log_prob_gamma_nu_int,cosmo_model,use_gamma_info,
             use_astropy)
 
@@ -476,7 +498,10 @@ class TDCKinLikelihood(TDCLikelihood):
         """
 
         if self.use_astropy:
-            raise ValueError("astropy option not implemented for TDC+Kin")
+            Ds_div_Dds_computed = tdc_utils.kin_distance_ratio(
+                proposed_cosmo,self.z_lens,self.z_src
+            )
+            #raise ValueError("astropy option not implemented for TDC+Kin")
         else:
             Ds_div_Dds_computed = tdc_utils.jax_kin_distance_ratio(
                 proposed_cosmo,self.z_lens,self.z_src)
@@ -491,11 +516,20 @@ class TDCKinLikelihood(TDCLikelihood):
         # scale the kin_pred with cosmology term: sigma_v = sqrt(Ds/Dds)*c*sqrt(mathcal{J})
         sigma_v_pred = np.sqrt(Ds_div_Dds_repeated)*self.kin_pred_samples
 
+        # Account for mass sheets: 
+        #   sigma_v = sqrt(lambda) * sigma_v
+        #   lambda = (1-kappa_ext)*lambda_int
+
         # sqrt(lambda) scaling if lambda_int is present
         if lambda_int_samples is not None:
             lambda_int_repeated = np.repeat(lambda_int_samples[:,:,np.newaxis],
                 self.num_kin_bins, axis=2)
             sigma_v_pred *= np.sqrt(lambda_int_repeated)
+        # sqrt(1-kappa_ext) scaling
+        if self.kappa_ext_samples is not None:
+            kappa_ext_repeated = np.repeat(self.kappa_ext_samples[:,:,np.newaxis],
+                self.num_kin_bins, axis=2)
+            sigma_v_pred *= np.sqrt(1 - kappa_ext_repeated)
 
         return sigma_v_pred
     
@@ -571,12 +605,17 @@ class TDCKinLikelihood(TDCLikelihood):
         sigma_v_pred_samples = self.sigma_v_pred_from_kin_pred(
             proposed_cosmo,lambda_int_samples)
         # TODO: test jitting this
-        sigma_v_log_likelihoods = self.jax_sigma_v_log_likelihood_per_samp(
-            jnp.asarray(sigma_v_pred_samples),
-            jnp.asarray(self.sigma_v_measured),
-            jnp.asarray(self.sigma_v_likelihood_prec),
-            jnp.asarray(self.sigma_v_likelihood_prefactors))
-        sigma_v_log_likelihoods = np.asarray(sigma_v_log_likelihoods)
+        if USE_JAX:
+            sigma_v_log_likelihoods = self.jax_sigma_v_log_likelihood_per_samp(
+                jnp.asarray(sigma_v_pred_samples),
+                jnp.asarray(self.sigma_v_measured),
+                jnp.asarray(self.sigma_v_likelihood_prec),
+                jnp.asarray(self.sigma_v_likelihood_prefactors))
+            sigma_v_log_likelihoods = np.asarray(sigma_v_log_likelihoods)
+        else:
+            sigma_v_log_likelihoods = self.sigma_v_log_likelihood_per_samp(
+                sigma_v_pred_samples
+            )
 
         # reweighting factor
         # NOTE: hardcoding of hyperparameter order!! (-2 is mu, -1 is sigma)
@@ -594,9 +633,8 @@ class TDCKinLikelihood(TDCLikelihood):
             rw_factor += beta_rw_factor
 
         # TODO: testing some jitting here (jit doesn't like the ==0 statement)
-        jax_replace=True
 
-        if jax_replace:
+        if USE_JAX:
             individ_likelihood = jax_fpd_samp_summation(jnp.asarray(
                 td_log_likelihoods+sigma_v_log_likelihoods+rw_factor))
             individ_likelihood = np.asarray(individ_likelihood)
@@ -609,10 +647,10 @@ class TDCKinLikelihood(TDCLikelihood):
 
         # sum over all lenses
         # TODO: there is a way to do this in jax
-        if np.sum(individ_likelihood == 0) > 0:
-            return -np.inf
+        if jnp.sum(individ_likelihood == 0) > 0:
+            log_likelihood = -jnp.inf
 
-        if jax_replace:
+        if USE_JAX:
             log_likelihood = jax_lenses_summation(jnp.asarray(individ_likelihood))
         else:
             log_likelihood = np.sum(np.log(individ_likelihood))
@@ -835,9 +873,10 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
                 lp += fll
 
         return lp
-    
-    # emcee stuff here
+
+    # generate initial state
     cur_state = generate_initial_state(n_walkers,cosmo_model)
+    # emcee stuff here
     sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior)
 
     # run mcmc
@@ -845,5 +884,5 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
     tok_mcmc = time.time()
     print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
-
+    
     return sampler.get_chain()

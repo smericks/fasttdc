@@ -88,6 +88,10 @@ class TDCSamplerTests(unittest.TestCase):
             [0.1,-0.1,0.05,-0.05,0.]
         ])
 
+        self.kappa_ext_samples = np.asarray([
+            [0.,0.01,-0.01,0.02,-0.02]
+        ])
+
 
 
     def test_tdclikelihood(self):
@@ -303,6 +307,7 @@ class TDCSamplerTests(unittest.TestCase):
             self.sigma_v_measured,self.sigma_v_likelihood_prec,
             self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
             self.kin_pred_samples,
+            kappa_ext_samples=self.kappa_ext_samples,
             z_lens=[0.6],z_src=[1.3],cosmo_model='LCDM_lambda_int')
         
         # check if it works, test_chain dims are: (walkers,samples,params)
@@ -315,7 +320,7 @@ class TDCSamplerTests(unittest.TestCase):
         # construct a beta_ani modeling prior
         beta_ani_nu_int = norm(loc=0.,scale=0.2).logpdf
 
-        # Check that inclusion of beta_ani works
+        # Check that inclusion of kappa_ext and beta_ani works
         ifu_quad_lklhd = tdc_sampler.TDCKinLikelihood(
             self.td_measured_quads,self.td_prec_quads,
             self.ifu_sigma_v_measured,self.ifu_sigma_v_likelihood_prec,
