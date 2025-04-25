@@ -8,6 +8,7 @@ from astropy.cosmology import w0waCDM
 import Utils.tdc_utils as tdc_utils
 import emcee
 import time
+import sys
 
 # flag for whether to use jax or not
 USE_JAX = False
@@ -680,13 +681,14 @@ def jax_lenses_summation(individ_likelihood):
 #########################
 
 def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
-    n_walkers=20):
+    n_walkers=20, use_mpi=False):
     """
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
             (will add log likelihoods together)
         num_emcee_samps (int): Number of iterations for MCMC inference
         n_walkers (int): Number of emcee walkers
+        use_mpi (bool): If True, uses MPI for parallelization
         
     Returns: 
         mcmc chain (emcee.EnsemblerSampler.chain)
@@ -877,12 +879,24 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     # generate initial state
     cur_state = generate_initial_state(n_walkers,cosmo_model)
     # emcee stuff here
-    sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior)
-
-    # run mcmc
-    tik_mcmc = time.time()
-    _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
-    tok_mcmc = time.time()
-    print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
-    
+    if not use_mpi:
+        sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior)
+        # run mcmc
+        tik_mcmc = time.time()
+        _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
+        tok_mcmc = time.time()
+        print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+    else: 
+        from schwimmbad import MPIPool
+        with MPIPool() as pool:
+            if not pool.is_master():
+                pool.wait()
+                sys.exit(0)
+            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior)
+            # run mcmc
+            tik_mcmc = time.time()
+            _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False, pool=pool)
+            tok_mcmc = time.time()
+            print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+        
     return sampler.get_chain()
