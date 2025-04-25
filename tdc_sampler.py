@@ -756,9 +756,9 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
             return -np.inf
         elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(beta_ani)
             return -np.inf
-        elif hyperparameters[6] < 1.5 or hyperparameters[4] > 2.5: #mu(gamma_lens)
+        elif hyperparameters[6] < 1.5 or hyperparameters[6] > 2.5: #mu(gamma_lens)
             return -np.inf
-        elif hyperparameters[7] < 0.001 or hyperparameters[5] > 0.2: #sigma(gamma_lens)
+        elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.2: #sigma(gamma_lens)
             return -np.inf
         
         return 0
