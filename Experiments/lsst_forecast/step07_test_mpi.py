@@ -10,6 +10,7 @@ import tdc_sampler
 
 
 # USER SETTINGS HERE (TODO: change filepaths)
+np.random.seed(123)
 data_vectors = {
     'gold_quads':{
         'h5_file':'DataVectors/gold/quad_posteriors_KIN.h5',
