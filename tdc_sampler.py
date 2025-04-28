@@ -892,10 +892,11 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     else: 
         print("Using MPI for parallelization...")
         from schwimmbad import MPIPool
-        with MPIPool() as pool:
-            if not pool.is_master():
-                pool.wait()
-                sys.exit(0)
+        pool = MPIPool()
+        if not pool.is_master():
+            pool.wait()
+            sys.exit(0)
+        with pool:
             sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn, pool=pool)
             # run mcmc
             tik_mcmc = time.time()
