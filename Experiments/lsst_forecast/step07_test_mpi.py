@@ -25,7 +25,7 @@ data_vectors = {
         'sigma_v_measurement_error_kmpersec':5.
     }
 }
-NUM_EMCEE_SAMPS = 100
+NUM_EMCEE_SAMPS = 10
 USE_ASTROPY = True #use this flag to avoid jax_cosmo DDts 
 
 #############

@@ -888,12 +888,17 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     cur_state = generate_initial_state(n_walkers,cosmo_model)
     # emcee stuff here
     if not use_mpi:
-        sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn)
-        # run mcmc
-        tik_mcmc = time.time()
-        _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
-        tok_mcmc = time.time()
-        print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+        from multiprocessing import Pool, cpu_count
+        cpu_count = cpu_count()
+        print("Using multiprocessing for parallelization...")
+        print("Number of CPUs: %d"%cpu_count)
+        with Pool() as pool:
+            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn)
+            # run mcmc
+            tik_mcmc = time.time()
+            _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
+            tok_mcmc = time.time()
+            print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
     else: 
         print("Using MPI for parallelization...")
         from schwimmbad import MPIPool
