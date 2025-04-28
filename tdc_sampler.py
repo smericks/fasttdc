@@ -7,6 +7,8 @@ import emcee
 import time
 import sys
 from functools import partial
+from mpi4py import MPI
+import os
 
 # flag for whether to use jax or not
 USE_JAX = False
@@ -764,6 +766,9 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
                 mu_lint,sigma_lint,mu_bani,sigma_bani,mu_gamma,sigma_gamma] 
             - w0waCDM: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
     """
+    rank = MPI.COMM_WORLD.Get_rank()
+    pid = os.getpid()
+    print(f"[Rank {rank} | PID {pid}] Evaluating log-posterior at {theta}")
     # Prior
     if cosmo_model == 'LCDM':
         lp = LCDM_log_prior(hyperparameters)
@@ -800,7 +805,7 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     for i in range(1,len(tdc_likelihood_list)):
         if tdc_likelihood_list[i].cosmo_model != cosmo_model:
             raise ValueError("")
-            
+
     log_posterior_fn = partial(log_posterior, cosmo_model=cosmo_model,
         tdc_likelihood_list=tdc_likelihood_list)
 
