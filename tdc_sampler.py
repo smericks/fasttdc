@@ -10,7 +10,7 @@ import emcee
 import time
 import sys
 from functools import partial
-from mpi4py import MPI
+#from mpi4py import MPI
 import os
 
 # flag for whether to use jax or not
@@ -841,9 +841,9 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
                 mu_lint,sigma_lint,mu_bani,sigma_bani,mu_gamma,sigma_gamma] 
             - w0waCDM: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
     """
-    rank = MPI.COMM_WORLD.Get_rank()
-    pid = os.getpid()
-    print(f"[Rank {rank} | PID {pid}] Evaluating log-posterior at {hyperparameters}")
+    #rank = MPI.COMM_WORLD.Get_rank()
+    #pid = os.getpid()
+    #print(f"[Rank {rank} | PID {pid}] Evaluating log-posterior at {hyperparameters}")
     # Prior
     if cosmo_model == 'LCDM':
         lp = LCDM_log_prior(hyperparameters)
@@ -888,17 +888,17 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     cur_state = generate_initial_state(n_walkers,cosmo_model)
     # emcee stuff here
     if not use_mpi:
-        from multiprocessing import Pool, cpu_count
-        cpu_count = cpu_count()
-        print("Using multiprocessing for parallelization...")
-        print("Number of CPUs: %d"%cpu_count)
-        with Pool() as pool:
-            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn)
-            # run mcmc
-            tik_mcmc = time.time()
-            _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
-            tok_mcmc = time.time()
-            print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+        #from multiprocessing import Pool, cpu_count
+        #cpu_count = cpu_count()
+        #print("Using multiprocessing for parallelization...")
+        #print("Number of CPUs: %d"%cpu_count)
+        #with Pool() as pool:
+        sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn)
+        # run mcmc
+        tik_mcmc = time.time()
+        _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
+        tok_mcmc = time.time()
+        print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
     else: 
         print("Using MPI for parallelization...")
         from schwimmbad import MPIPool
