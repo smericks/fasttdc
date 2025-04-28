@@ -123,8 +123,8 @@ def construct_likelihood_obj(
             num_kin_bins = np.shape(c_sqrtJ_samps)[-1]
             
     # set up some sizes
-    num_lenses = np.shape[fpd_samps][0]
-    num_td = np.shape[fpd_samps][-1]
+    num_lenses = np.shape(fpd_samps)[0]
+    num_td = np.shape(fpd_samps)[-1]
             
     # load in from metadata file
     all_metadata_df = pd.read_csv(metadata_file)
@@ -171,20 +171,26 @@ def construct_likelihood_obj(
             for j in range(0,num_kin_bins):
                 to_gaussianize_input.append(c_sqrtJ_samps[:,:,j])
 
+        to_gaussianize_input = np.asarray(to_gaussianize_input)
+        # switch 1st dim to last dim (parameters dim)
+        input_samps = np.transpose(to_gaussianize_input,axes=(1,2,0))
         # now gaussianize
-        input_samps = np.stack(tuple(to_gaussianize_input))
-        gaussian_samps = gaussianize_samples(input_samps,num_gaussianized_samps)
+        gaussian_samps = np.empty((num_lenses,
+            num_gaussianized_samps,np.shape(input_samps)[-1]))
+        for l_idx in range(0,num_lenses):
+            gaussian_samps[l_idx] = gaussianize_samples(
+                input_samps[l_idx],num_gaussianized_samps)
 
     # deal with edge cases of 1 td, 1 kinematic bin
     # 1 td
     gaussian_fpd_samps = gaussian_samps[:,:,0:num_td]
-    if num_td == 1:
-        gaussian_fpd_samps = gaussian_fpd_samps[:,:,np.newaxis]
+    #if num_td == 1:
+    #    gaussian_fpd_samps = gaussian_fpd_samps[:,:,np.newaxis]
     # 1 kin bin
     if kinematic_type is not None:
         gaussian_kin_samps = gaussian_samps[:,:,-num_kin_bins:]
-        if num_kin_bins == 1:
-            gaussian_kin_samps = gaussian_kin_samps[:,:,np.newaxis]
+    #    if num_kin_bins == 1:
+    #        gaussian_kin_samps = gaussian_kin_samps[:,:,np.newaxis]
 
     
     if kinematic_type is not None:
