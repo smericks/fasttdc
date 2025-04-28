@@ -875,7 +875,7 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     for i in range(1,len(tdc_likelihood_list)):
         if tdc_likelihood_list[i].cosmo_model != cosmo_model:
             raise ValueError("")
-
+            
     log_posterior_fn = partial(log_posterior, cosmo_model=cosmo_model,
         tdc_likelihood_list=tdc_likelihood_list)
 
