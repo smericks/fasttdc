@@ -843,7 +843,7 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
     """
     rank = MPI.COMM_WORLD.Get_rank()
     pid = os.getpid()
-    print(f"[Rank {rank} | PID {pid}] Evaluating log-posterior at {theta}")
+    print(f"[Rank {rank} | PID {pid}] Evaluating log-posterior at {hyperparameters}")
     # Prior
     if cosmo_model == 'LCDM':
         lp = LCDM_log_prior(hyperparameters)
