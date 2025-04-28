@@ -1,16 +1,17 @@
 import numpy as np
-import jax
-jax.config.update("jax_enable_x64", True)
-import jax_cosmo.background as jc_background
-import jax_cosmo.utils as jc_utils
+#import jax
+#jax.config.update("jax_enable_x64", True)
+#import jax_cosmo.background as jc_background
+#import jax_cosmo.utils as jc_utils
 
 C_kmpersec = 299792
 Mpc_in_km = 3.086e+19 #("Mpc in units of km")
 arcsec_in_rad = 4.84814e-6 #("arcsec in units of rad")
 
+"""
 @jax.jit
 def jax_ddt_from_redshifts(my_cosmology,z_lens,z_src):
-    """
+
     Ddt = (1+z_lens) (D_d*D_s)/(D_ds)
 
     Args:
@@ -20,7 +21,7 @@ def jax_ddt_from_redshifts(my_cosmology,z_lens,z_src):
 
     Returns:
         ddt (jax array): time delay distances in Mpc 
-    """
+
 
     # translate redshift to scale factor
     a_lens = jc_utils.z2a(z_lens)
@@ -36,7 +37,7 @@ def jax_ddt_from_redshifts(my_cosmology,z_lens,z_src):
     Ddt = (1+z_lens)*D_d*D_s/D_ds
 
     return Ddt
-
+"""
 
 def ddt_from_redshifts_colossus(my_cosmology,z_lens,z_src):
     """
@@ -119,9 +120,10 @@ def ddt_from_td_fpd(td,delta_phi):
     return Ddt
 
 
+"""
 @jax.jit
 def jax_kin_distance_ratio(my_cosmology,z_lens,z_src):
-    """
+
     Computes: D_s / D_ds
 
     Args:
@@ -131,7 +133,7 @@ def jax_kin_distance_ratio(my_cosmology,z_lens,z_src):
 
     Returns:
         kin_dist_ratio (jax array): (D_s / D_ds) (unitless)
-    """
+
 
     # translate redshift to scale factor
     a_lens = jc_utils.z2a(z_lens)
@@ -144,7 +146,8 @@ def jax_kin_distance_ratio(my_cosmology,z_lens,z_src):
     D_ds = (comoving_ds / (z_src+1.))/my_cosmology.h
 
     return D_s/D_ds
-
+"""
+    
 def kin_distance_ratio(my_cosmology,z_lens,z_src):
     """
     Computes: D_s / D_ds

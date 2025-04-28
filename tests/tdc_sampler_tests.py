@@ -3,6 +3,7 @@ import numpy as np
 import jax.numpy as jnp
 import sys
 import jax_cosmo
+from astropy.cosmology import FlatLambdaCDM
 from scipy.stats import norm,multivariate_normal,uniform
 sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/')
 import tdc_sampler
@@ -11,6 +12,9 @@ import Utils.tdc_utils as tdc_utils
 class TDCSamplerTests(unittest.TestCase):
 
     def setUp(self):
+
+        self.use_astropy=True
+        self.astropy_cosmo = FlatLambdaCDM(H0=70.,Om0=0.3)
 
         self.td_measured_dbls = np.asarray([
             [100],
@@ -93,6 +97,32 @@ class TDCSamplerTests(unittest.TestCase):
         ])
 
 
+    def test_td_pred_from_fpd_pred(self):
+        
+        z_lens = [0.5,0.6]
+        z_src = [1.2,1.3]
+        dbl_lklhd = tdc_sampler.TDCLikelihood(
+            np.repeat(self.td_measured_dbls,2,axis=0),
+            np.repeat(self.td_prec_dbls,2,axis=0),
+            np.repeat(self.fpd_pred_samples_dbls,2,axis=0),
+            np.repeat(self.gamma_pred_samples_dbls,2,axis=0),
+            z_lens=z_lens,z_src=z_src,use_astropy=self.use_astropy)
+        
+        proposed_cosmo = self.astropy_cosmo
+
+        td_pred_samples = dbl_lklhd.td_pred_from_fpd_pred(
+            proposed_cosmo
+        )
+
+        # Test with only one lens...
+        dbl_lklhd = tdc_sampler.TDCLikelihood(
+            self.td_measured_dbls,self.td_prec_dbls,
+            self.fpd_pred_samples_dbls,self.gamma_pred_samples_dbls,
+            z_lens=[0.5],z_src=[1.2],use_astropy=self.use_astropy)
+        td_pred_samples = dbl_lklhd.td_pred_from_fpd_pred(
+            proposed_cosmo
+        )
+
 
     def test_tdclikelihood(self):
 
@@ -102,19 +132,19 @@ class TDCSamplerTests(unittest.TestCase):
         dbl_lklhd = tdc_sampler.TDCLikelihood(
             self.td_measured_dbls,self.td_prec_dbls,
             self.fpd_pred_samples_dbls,self.gamma_pred_samples_dbls,
-            z_lens=[0.5],z_src=[1.2])
+            z_lens=[0.5],z_src=[1.2],use_astropy=self.use_astropy)
         quad_lklhd = tdc_sampler.TDCLikelihood(
             self.td_measured_quads,self.td_prec_quads,
             self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
-            z_lens=[0.6],z_src=[1.3])
+            z_lens=[0.6],z_src=[1.3],use_astropy=self.use_astropy)
         dbl_lklhd_w0wa = tdc_sampler.TDCLikelihood(
             self.td_measured_dbls,self.td_prec_dbls,
             self.fpd_pred_samples_dbls,self.gamma_pred_samples_dbls,
-            z_lens=[0.5],z_src=[1.2],cosmo_model='w0waCDM')
+            z_lens=[0.5],z_src=[1.2],cosmo_model='w0waCDM',use_astropy=self.use_astropy)
         quad_lklhd_w0wa = tdc_sampler.TDCLikelihood(
             self.td_measured_quads,self.td_prec_quads,
             self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
-            z_lens=[0.6],z_src=[1.3],cosmo_model='w0waCDM')
+            z_lens=[0.6],z_src=[1.3],cosmo_model='w0waCDM',use_astropy=self.use_astropy)
         
         # FUNCTION 1: td_log_likelihood_per_samp
         td_pred_samples = dbl_lklhd.fpd_samples*1.2
@@ -214,7 +244,8 @@ class TDCSamplerTests(unittest.TestCase):
                     self.sigma_v_measured,self.sigma_v_likelihood_prec,
                     self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
                     self.kin_pred_samples,
-                    z_lens=[0.6],z_src=[1.3])
+                    z_lens=[0.6],z_src=[1.3],
+                    use_astropy=self.use_astropy)
         
         # h0,Omega_M,mu(gamma_lens),sigma(gamma_lens)
         hyperparameters = [70.,0.3,2.0,0.1]
@@ -280,7 +311,7 @@ class TDCSamplerTests(unittest.TestCase):
         my_tdc = tdc_sampler.TDCLikelihood(
             self.td_measured_dbls,self.td_prec_dbls,
             self.fpd_pred_samples_dbls,self.gamma_pred_samples_dbls,
-            z_lens=[0.5],z_src=[1.2])
+            z_lens=[0.5],z_src=[1.2],use_astropy=self.use_astropy)
 
 
         # check if it works, test_chain dims are: (walkers,samples,params)
@@ -293,7 +324,7 @@ class TDCSamplerTests(unittest.TestCase):
         quads_tdc_lhood = tdc_sampler.TDCLikelihood(
             self.td_measured_quads,self.td_prec_quads,
             self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
-            z_lens=[0.6],z_src=[1.3])
+            z_lens=[0.6],z_src=[1.3],use_astropy=self.use_astropy)
         
         # check if it works, test_chain dims are: (walkers,samples,params)
         test_chain = tdc_sampler.fast_TDC([my_tdc,quads_tdc_lhood],
@@ -308,7 +339,8 @@ class TDCSamplerTests(unittest.TestCase):
             self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
             self.kin_pred_samples,
             kappa_ext_samples=self.kappa_ext_samples,
-            z_lens=[0.6],z_src=[1.3],cosmo_model='LCDM_lambda_int')
+            z_lens=[0.6],z_src=[1.3],cosmo_model='LCDM_lambda_int',
+            use_astropy=self.use_astropy)
         
         # check if it works, test_chain dims are: (walkers,samples,params)
         test_chain = tdc_sampler.fast_TDC([quad_kin_lklhd],num_emcee_samps=5,
@@ -328,7 +360,8 @@ class TDCSamplerTests(unittest.TestCase):
             self.ifu_sigma_v_pred_samples,
             beta_ani_samples=self.beta_ani_samples,
             log_prob_beta_ani_nu_int=beta_ani_nu_int,
-            z_lens=[0.6],z_src=[1.3],cosmo_model='LCDM_lambda_int_beta_ani')
+            z_lens=[0.6],z_src=[1.3],cosmo_model='LCDM_lambda_int_beta_ani',
+            use_astropy=self.use_astropy)
 
         test_chain = tdc_sampler.fast_TDC([ifu_quad_lklhd],num_emcee_samps=5,
             n_walkers=20)
@@ -342,14 +375,15 @@ class TDCSamplerTests(unittest.TestCase):
         fpd_truth = [ -0.03878689524637091, -0.11086611144147474, -0.12145087695149426]
         td_truth = [ -4.355989563838178, -12.450896658648382, -13.639626197438508]
         # Ground Truth Cosmology
-        gt_cosmo = jax_cosmo.Cosmology(h=jnp.float32(70./100),
-                        Omega_c=jnp.float32(0.3-0.05), # "cold dark matter fraction", OmegaM = 0.3
-                        Omega_b=jnp.float32(0.05), # "baryonic fraction"
-                        Omega_k=jnp.float32(0.),
-                        w0=jnp.float32(-1.),
-                        wa=jnp.float32(0.),
-                        sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
-        Ddt_truth = tdc_utils.jax_ddt_from_redshifts(gt_cosmo,z_lens,z_src)
+        #gt_cosmo = jax_cosmo.Cosmology(h=jnp.float32(70./100),
+        #                Omega_c=jnp.float32(0.3-0.05), # "cold dark matter fraction", OmegaM = 0.3
+        #                Omega_b=jnp.float32(0.05), # "baryonic fraction"
+        #                Omega_k=jnp.float32(0.),
+        #                w0=jnp.float32(-1.),
+        #               wa=jnp.float32(0.),
+        #                sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
+        #Ddt_truth = tdc_utils.jax_ddt_from_redshifts(gt_cosmo,z_lens,z_src)
+        Ddt_truth = tdc_utils.ddt_from_redshifts(self.astropy_cosmo,z_lens,z_src)
 
         fpd_samps = multivariate_normal.rvs(mean=fpd_truth,
             cov=(0.02**2)*np.eye(3),size=5000) # 0.02 measurement error
@@ -371,4 +405,3 @@ class TDCSamplerTests(unittest.TestCase):
         print('Predicted ddt: ', ddt_chain_mean, ' +/- ', ddt_chain_sigma)
         print("True ddt: ", Ddt_truth)
         
-
