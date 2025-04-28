@@ -205,7 +205,7 @@ def gaussianize_samples(input_samps,num_gaussian_samps=5000):
 #########################
 # Construct likelihood.
 #########################
-input_samps_array = np.stack((data_vectors['gold_quads']['fpd_samps'][:10,:,0],
+input_samps_array = np.stack((data_vectors['gold_quads']['fpd_samps'][:100,:,0],
     data_vectors['gold_quads']['fpd_samps'][:100,:,1],
     data_vectors['gold_quads']['fpd_samps'][:100,:,2],
     data_vectors['gold_quads']['lens_param_samps'][:100,:,3],
@@ -239,7 +239,7 @@ quad_kin_lklhd_kappa_ext = tdc_sampler.TDCKinLikelihood(
     beta_ani_samples=output_samps_array[:,:,4],
     kin_pred_samples=output_samps_array[:,:,5:],
     kappa_ext_samples=data_vectors['gold_quads']['kappa_ext_samps'][:100],
-    z_lens=data_vectors['gold_quads']['z_lens'][:10],
+    z_lens=data_vectors['gold_quads']['z_lens'][:100],
     z_src=data_vectors['gold_quads']['z_src'][:100],
     cosmo_model='LCDM_lambda_int_beta_ani',
     log_prob_gamma_nu_int=gamma_kde,
