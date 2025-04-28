@@ -1,0 +1,272 @@
+# This helper code finishes the emulation and prepares data vectors for input to tdc_sampler
+import numpy as np
+import pandas as pd
+import h5py
+from scipy.stats import norm, multivariate_normal
+import sys
+sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/')
+import tdc_sampler
+
+
+data_vector_dicts = {
+    'gold_quads':{
+        'h5_file':'DataVectors/gold/quad_posteriors_KIN.h5',
+        'metadata_file':'DataVectors/gold/truth_metadata.csv',
+        'td_measurement_error_days':5.,
+        'sigma_v_measurement_error_kmpersec':5.
+    }
+}
+
+# NOTE: hard-coded modeling priors (can change later)
+GAMMA_LENS_PRIOR = norm(loc=2.,scale=0.2).logpdf
+BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
+COSMO_MODEL = 'LCDM_lambda_int_beta_ani'
+
+
+def retrieve_truth_td(metadata_df,num_td):
+    if num_td == 1: 
+        # NOTE: will this keep the last dim=(..,..,1) ? 
+        td_truth = metadata_df.loc[:,['td01']].to_numpy()
+    elif num_td == 3:
+        td_truth = metadata_df.loc[:,['td01','td02','td03']].to_numpy()
+
+    return td_truth
+
+def retrieve_truth_kin(metadata_df,kinematic_type):
+    """
+    Args:
+        metadata_df
+        kinematic_type (string): Options are: '4MOST', 'MUSE', or 'NIRSPEC'
+    """
+
+    # 4MOST
+    if kinematic_type == '4MOST':
+        return metadata_df.loc[:,['sigma_v_4MOST_kmpersec']].to_numpy()
+
+    # MUSE
+    if kinematic_type == 'MUSE':
+        muse_keys = ['sigma_v_MUSE_bin'+str(j)+'_kmpersec' for j in range(0,3)]
+        return metadata_df.loc[:,muse_keys].to_numpy()
+
+    # NIRSPEC
+    if kinematic_type == 'NIRSPEC':
+        nirspec_keys = ['sigma_v_NIRSPEC_bin'+str(j)+'_kmpersec' for j in range(0,10)]
+        return metadata_df.loc[:,nirspec_keys].to_numpy()
+
+
+    raise ValueError("kinematic_type not supported")
+
+def gaussianize_samples(input_samps,num_gaussian_samps=5000):
+    """takes in input samples, fits a Gaussian, and returns new samples
+        from that Gaussian
+    Args:
+        input_samps (n_input_samps,n_params)
+    Returns:
+        output_samps (n_gaussian_samps,n_params)
+    """
+
+    Mu = np.mean(input_samps,axis=0)
+    Cov = np.cov(input_samps,rowvar=False)
+
+    gaussianized_samps = multivariate_normal.rvs(mean=Mu,cov=Cov,
+        size=num_gaussian_samps)
+
+    return gaussianized_samps
+
+#############################
+# Construct likelihood object
+#############################
+
+def construct_likelihood_obj(
+    posteriors_h5_file,metadata_file,catalog_idxs,
+    td_meas_error_percent=None,td_meas_error_days=None,
+    kappa_ext_meas_error_value=0.05,
+    kinematic_type=None,
+    kin_meas_error_percent=None,kin_meas_error_kmpersec=None,
+    num_gaussianized_samps=None):
+    """
+    Args:
+        posteriors_h5_file ()
+        metadata_file ()
+        catalog_idxs (np.array[int]): catalog indices of the subset of lenses 
+            used from these files
+        kinematic_type (string): Default=None. Options are: '4MOST', 'MUSE', or 'NIRSPEC'
+        num_gaussianized_samps (int): Default=None (use samples as is). If specified,
+            a Gaussian will be fit to the provided samples, and a new batch of 
+            |num_gaussianized_samps| samples will be drawn from that distribution 
+        
+    """
+
+    # load in from posteriors file
+    with h5py.File(posteriors_h5_file, "r") as h5:
+
+        # set-up indexing
+        h5_catalog_idxs = h5['catalog_idxs'][:]
+        my_idxs = np.isin(h5_catalog_idxs,catalog_idxs)
+
+        fpd_samps = h5['fpd_samps'][my_idxs]
+        lens_param_samps = h5['lens_param_samps'][my_idxs]
+        beta_ani_samps = h5['beta_ani_samps'][my_idxs]
+        h5_catalog_idxs = h5['catalog_idxs'][my_idxs]
+
+        # pull c_sqrtJ_samps based on kinematic type
+        if kinematic_type is not None:
+            if kinematic_type == '4MOST':
+                c_sqrtJ_samps = h5['c_sqrtJ_samps'][my_idxs]
+            elif kinematic_type == 'MUSE':
+                c_sqrtJ_samps = h5['MUSE_c_sqrtJ_samps'][my_idxs]
+            elif kinematic_type == 'NIRSPEC':
+                c_sqrtJ_samps = h5['NIRSPEC_c_sqrtJ_samps'][my_idxs]
+            else:
+                raise ValueError("kinematic_type not supported")
+            
+            num_kin_bins = np.shape(c_sqrtJ_samps)[-1]
+            
+    # set up some sizes
+    num_lenses = np.shape[fpd_samps][0]
+    num_td = np.shape[fpd_samps][-1]
+            
+    # load in from metadata file
+    all_metadata_df = pd.read_csv(metadata_file)
+    # set up indexing
+    metadata_catalog_idxs = all_metadata_df.loc[:,'catalog_idx']
+    metadata_idx = np.isin(metadata_catalog_idxs,catalog_idxs)
+    metadata_df = all_metadata_df.loc[metadata_idx]
+
+    # emulate time-delay measurement
+    td_truth = retrieve_truth_td(metadata_df, num_td)
+    td_meas, td_meas_prec = emulate_measurements(td_truth, 
+        td_meas_error_percent,td_meas_error_days)
+    
+    # TODO: emulate kappa_ext
+    if num_gaussianized_samps is not None:
+        kappa_ext_samps = norm.rvs(loc=0.,
+            scale=kappa_ext_meas_error_value,
+            size=(num_lenses,num_gaussianized_samps))
+    else:
+        kappa_ext_samps = norm.rvs(loc=0.,
+            scale=kappa_ext_meas_error_value,
+            size=(num_lenses,np.shape[fpd_samps][1]))
+    
+    # emulate kinematics
+    if kinematic_type is not None:
+        kin_truth = retrieve_truth_kin(metadata_df,kinematic_type)
+        sigma_v_meas,sigma_v_meas_prec = emulate_measurements(kin_truth,
+            kin_meas_error_percent,kin_meas_error_kmpersec)
+
+    # gaussianize samples if requested
+    if num_gaussianized_samps is not None:
+        to_gaussianize_input = []
+        # fpds
+        for i in range(0,num_td):
+            to_gaussianize_input.append(fpd_samps[:,:,i])
+        # gamma_lens
+        to_gaussianize_input.append(lens_param_samps[:,:,3])
+        gamma_idx = num_td
+        if kinematic_type is not None:
+            # beta_ani
+            to_gaussianize_input.append(beta_ani_samps)
+            beta_idx = num_td+1
+            # sigma_v bins
+            for j in range(0,num_kin_bins):
+                to_gaussianize_input.append(c_sqrtJ_samps[:,:,j])
+
+        # now gaussianize
+        input_samps = np.stack(tuple(to_gaussianize_input))
+        gaussian_samps = gaussianize_samples(input_samps,num_gaussianized_samps)
+
+    # deal with edge cases of 1 td, 1 kinematic bin
+    # 1 td
+    gaussian_fpd_samps = gaussian_samps[:,:,0:num_td]
+    if num_td == 1:
+        gaussian_fpd_samps = gaussian_fpd_samps[:,:,np.newaxis]
+    # 1 kin bin
+    if kinematic_type is not None:
+        gaussian_kin_samps = gaussian_samps[:,:,-num_kin_bins:]
+        if num_kin_bins == 1:
+            gaussian_kin_samps = gaussian_kin_samps[:,:,np.newaxis]
+
+    
+    if kinematic_type is not None:
+
+        # TODO: kappa_ext!!
+        likelihood_obj = tdc_sampler.TDCKinLikelihood(
+            td_measured=td_meas,
+            td_likelihood_prec=td_meas_prec,
+            sigma_v_measured=sigma_v_meas,
+            sigma_v_likelihood_prec=sigma_v_meas_prec,
+            fpd_samples=gaussian_fpd_samps,
+            gamma_pred_samples=gaussian_samps[:,:,gamma_idx],
+            beta_ani_samples=gaussian_samps[:,:,beta_idx],
+            kin_pred_samples=gaussian_kin_samps,
+            kappa_ext_samples=kappa_ext_samps,
+            z_lens=metadata_df.loc[:,'main_deflector_parameters_z_lens'].to_numpy(),
+            z_src=metadata_df.loc[:,'source_parameters_z_source'].to_numpy(),
+            cosmo_model=COSMO_MODEL,
+            log_prob_gamma_nu_int=GAMMA_LENS_PRIOR,
+            log_prob_beta_ani_nu_int=BETA_ANI_PRIOR)
+
+    else:
+
+        likelihood_obj = tdc_sampler.TDCLikelihood(
+            td_measured=td_meas,
+            td_likelihood_prec=td_meas_prec,
+            fpd_samples=gaussian_fpd_samps,
+            gamma_pred_samples=gaussian_samps[:,:,gamma_idx],
+            kappa_ext_samples=kappa_ext_samps,
+            z_lens=metadata_df.loc[:,'main_deflector_parameters_z_lens'].to_numpy(),
+            z_src=metadata_df.loc[:,'source_parameters_z_source'].to_numpy(),
+            cosmo_model=COSMO_MODEL,
+            log_prob_gamma_nu_int=GAMMA_LENS_PRIOR,
+            log_prob_beta_ani_nu_int=BETA_ANI_PRIOR)
+
+
+    return likelihood_obj
+
+def emulate_measurements(sigma_v_truth, 
+        measurement_error_percent=None,measurement_error_kmpersec=None):
+    """NOTE: this is written in terms of sigma_v, but this can be used for
+        time-delays as well :) 
+
+    Args:
+        sigma_v_truth (n_lenses,n_kin_bins)
+        measurement_error_percent (float): a fractional value
+            (i.e. use 0.01 to represent 1% error)
+        measurement_error_kmpersec
+    Returns: 
+        sigma_v_measured (n_lenses,n_kin_bins), 
+        sigma_v_measurement_prec (n_lenses,n_kin_bins, n_kin_bins)
+    """
+
+    # must define either measurement_error_percent or measurement_error_kmpersec
+    if measurement_error_percent is not None and measurement_error_kmpersec is not None:
+        raise ValueError('Must specify kin. meas. error in either percent OR kmpersec (not both)')
+    elif measurement_error_percent is None and measurement_error_kmpersec is None:
+        raise ValueError('Must specify kin. meas. error in either percent OR kmpersec')
+    
+    # grab number of kin bins
+    num_kin_bins = np.shape(sigma_v_truth)[-1]
+    num_lenses = np.shape(sigma_v_truth)[0]
+
+    # construct array of measurement errors
+    # meas_sigma has shape (n_lenses,n_kin_bins)
+    if measurement_error_percent is not None:
+        meas_sigma = measurement_error_percent*sigma_v_truth
+    elif measurement_error_kmpersec is not None:
+        meas_sigma = measurement_error_kmpersec*np.ones(np.shape(sigma_v_truth))  
+
+
+    # construct covariance / precision matrices (NOTE: diagonal for now!)
+    cov_sigma_v = np.repeat(np.eye(num_kin_bins)[np.newaxis,:,:],repeats=num_lenses,axis=0)
+    for bin in range(0,num_kin_bins):
+        cov_sigma_v[:,bin,bin] = meas_sigma[:,bin]**2
+    prec_sigma_v = np.linalg.inv(cov_sigma_v)
+
+    # emulate mean measurement off of the truth
+    sigma_v_measured = np.empty(np.shape(sigma_v_truth))
+    for lens_idx in range(0,num_lenses):
+        sigma_v_measured[lens_idx] = multivariate_normal.rvs(
+            mean=sigma_v_truth[lens_idx],cov=cov_sigma_v[lens_idx])
+
+    # save to data vectors dict
+    return sigma_v_measured, prec_sigma_v
