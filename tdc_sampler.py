@@ -10,6 +10,8 @@ import emcee
 import time
 import sys
 from functools import partial
+import os 
+from mpi4py import MPI
 
 # flag for whether to use jax or not
 USE_JAX = False
@@ -840,6 +842,11 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
             - w0waCDM: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
     """
     # Prior
+    rank = MPI.COMM_WORLD.Get_rank()
+    pid = os.getpid()
+    
+    print(f"[Rank {rank} | PID {pid}] Evaluating log-posterior at {hyperparameters}")
+
     if cosmo_model == 'LCDM':
         lp = LCDM_log_prior(hyperparameters)
     elif cosmo_model == 'LCDM_lambda_int':
