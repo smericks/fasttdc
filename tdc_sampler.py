@@ -8,6 +8,8 @@ from astropy.cosmology import w0waCDM
 import Utils.tdc_utils as tdc_utils
 import emcee
 import time
+import sys
+from functools import partial
 
 # flag for whether to use jax or not
 USE_JAX = False
@@ -678,15 +680,191 @@ def jax_lenses_summation(individ_likelihood):
 #########################
 # Sampling Implementation
 #########################
+def LCDM_log_prior(hyperparameters):
+    """
+    Args:
+        hyperparameters ([H0,omega_M,mu_gamma,sigma_gamma])
+    """
+
+    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+        return -np.inf
+    if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+        return -np.inf
+    elif hyperparameters[2] < 1.5 or hyperparameters[2] > 2.5: #mu(gamma_lens)
+        return -np.inf
+    elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.2: #sigma(gamma_lens)
+        return -np.inf
+    
+    return 0
+
+def LCDM_lambda_int_log_prior(hyperparameters):
+    """
+    Args:
+        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
+            mu_gamma,sigma_gamma])
+    """
+
+    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+        return -np.inf
+    if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+        return -np.inf
+    elif hyperparameters[2] < 0.5 or hyperparameters[2] > 1.5: #mu(lambda_int)
+        return -np.inf
+    elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.5: #sigma(lambda_int)
+        return -np.inf
+    elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5: #mu(gamma_lens)
+        return -np.inf
+    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(gamma_lens)
+        return -np.inf
+    
+    return 0
+
+def LCDM_lambda_int_beta_ani_log_prior(hyperparameters):
+    """
+    Args:
+        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
+            mu_gamma,sigma_gamma])
+    """
+
+    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+        return -np.inf
+    if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+        return -np.inf
+    elif hyperparameters[2] < 0.5 or hyperparameters[2] > 1.5: #mu(lambda_int)
+        return -np.inf
+    elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.5: #sigma(lambda_int)
+        return -np.inf
+    elif hyperparameters[4] < -0.5 or hyperparameters[4] > 0.5: #mu(beta_ani)
+        return -np.inf
+    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(beta_ani)
+        return -np.inf
+    elif hyperparameters[6] < 1.5 or hyperparameters[4] > 2.5: #mu(gamma_lens)
+        return -np.inf
+    elif hyperparameters[7] < 0.001 or hyperparameters[5] > 0.2: #sigma(gamma_lens)
+        return -np.inf
+    
+    return 0
+
+def w0waCDM_log_prior(hyperparameters):
+    """
+    Args:
+        hyperparameters ([H0,Omega_M,w0,wa,mu_gamma,sigma_gamma])
+    """
+
+    # h0 [0,150]
+    if hyperparameters[0] < 0 or hyperparameters[0] > 150: 
+        return -np.inf
+    # Omega_M [0.05,0.5]
+    if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: 
+        return -np.inf
+    #w0 [-2,0]
+    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
+        return -np.inf
+    #wa [-2,2]
+    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
+        return -np.inf
+    #mu(gamma)
+    elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5:
+        return -np.inf
+    #sigma(gamma)
+    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2:
+        return -np.inf
+    
+    return 0
+
+def generate_initial_state(n_walkers,cosmo_model):
+    """
+    Args:
+        n_walkers (int): number of emcee walkers
+        cosmo_model (string): 'LCDM' or 'w0waCDM'
+    """
+
+    if cosmo_model == 'LCDM':
+        # order: [H0,Omega_M,mu_gamma,sigma_gamma]
+        cur_state = np.empty((n_walkers,4))
+        cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
+        cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
+        cur_state[:,2] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
+        cur_state[:,3] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+
+        return cur_state
+    
+    if cosmo_model == 'LCDM_lambda_int':
+        # order: [H0,Omega_M,mu_lambda_int,sigma_lambda_int,mu_gamma,sigma_gamma]
+        cur_state = np.empty((n_walkers,6))
+        cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
+        cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
+        cur_state[:,2] = uniform.rvs(loc=0.9,scale=0.2,size=n_walkers)
+        cur_state[:,3] = uniform.rvs(loc=0.001,scale=0.499,size=n_walkers)
+        cur_state[:,4] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
+        cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+
+        return cur_state
+    
+    if cosmo_model == 'LCDM_lambda_int_beta_ani':
+        # order: [H0,Omega_M,mu_lambda_int,sigma_lambda_int,
+        #   mu_beta_ani,sigma_beta_ani,mu_gamma,sigma_gamma]
+        cur_state = np.empty((n_walkers,8))
+        cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
+        cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
+        cur_state[:,2] = uniform.rvs(loc=0.9,scale=0.2,size=n_walkers)
+        cur_state[:,3] = uniform.rvs(loc=0.001,scale=0.499,size=n_walkers)
+        cur_state[:,4] = uniform.rvs(loc=-0.1,scale=0.2,size=n_walkers)
+        cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+        cur_state[:,6] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
+        cur_state[:,7] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+
+        return cur_state
+    
+    elif cosmo_model == 'w0waCDM':
+        # order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
+        cur_state = np.empty((n_walkers,6))
+        cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
+        cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
+        cur_state[:,2] = uniform.rvs(loc=-1.5,scale=1.,size=n_walkers)
+        cur_state[:,3] = uniform.rvs(loc=-1,scale=2,size=n_walkers)
+        cur_state[:,4] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
+        cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.19,size=n_walkers)
+
+        return cur_state
+
+
+
+def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
+    """
+    Args:
+        hyperparameters ([float]): 
+            - LCDM: [H0,Omega_M,mu_gamma,sigma_gamma] 
+            - LCDM_lambda_int_beta_ani: [H0,Omega_M,
+                mu_lint,sigma_lint,mu_bani,sigma_bani,mu_gamma,sigma_gamma] 
+            - w0waCDM: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
+    """
+    # Prior
+    if cosmo_model == 'LCDM':
+        lp = LCDM_log_prior(hyperparameters)
+    elif cosmo_model == 'LCDM_lambda_int':
+        lp = LCDM_lambda_int_log_prior(hyperparameters)
+    elif cosmo_model == 'LCDM_lambda_int_beta_ani':
+        lp = LCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+    elif cosmo_model == 'w0waCDM':
+        lp = w0waCDM_log_prior(hyperparameters)
+    # Likelihood
+    if lp == 0:
+        for tdc_likelihood in tdc_likelihood_list:
+            fll = tdc_likelihood.full_log_likelihood(hyperparameters)
+            lp += fll
+
+    return lp
 
 def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
-    n_walkers=20):
+    n_walkers=20, use_mpi=False):
     """
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
             (will add log likelihoods together)
         num_emcee_samps (int): Number of iterations for MCMC inference
         n_walkers (int): Number of emcee walkers
+        use_mpi (bool): If True, uses MPI for parallelization
         
     Returns: 
         mcmc chain (emcee.EnsemblerSampler.chain)
@@ -697,192 +875,32 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     for i in range(1,len(tdc_likelihood_list)):
         if tdc_likelihood_list[i].cosmo_model != cosmo_model:
             raise ValueError("")
-
-    def LCDM_log_prior(hyperparameters):
-        """
-        Args:
-            hyperparameters ([H0,omega_M,mu_gamma,sigma_gamma])
-        """
-
-        if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
-            return -np.inf
-        if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
-            return -np.inf
-        elif hyperparameters[2] < 1.5 or hyperparameters[2] > 2.5: #mu(gamma_lens)
-            return -np.inf
-        elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.2: #sigma(gamma_lens)
-            return -np.inf
-        
-        return 0
-    
-    def LCDM_lambda_int_log_prior(hyperparameters):
-        """
-        Args:
-            hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
-                mu_gamma,sigma_gamma])
-        """
-
-        if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
-            return -np.inf
-        if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
-            return -np.inf
-        elif hyperparameters[2] < 0.5 or hyperparameters[2] > 1.5: #mu(lambda_int)
-            return -np.inf
-        elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.5: #sigma(lambda_int)
-            return -np.inf
-        elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5: #mu(gamma_lens)
-            return -np.inf
-        elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(gamma_lens)
-            return -np.inf
-        
-        return 0
-    
-    def LCDM_lambda_int_beta_ani_log_prior(hyperparameters):
-        """
-        Args:
-            hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
-                mu_gamma,sigma_gamma])
-        """
-
-        if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
-            return -np.inf
-        if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
-            return -np.inf
-        elif hyperparameters[2] < 0.5 or hyperparameters[2] > 1.5: #mu(lambda_int)
-            return -np.inf
-        elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.5: #sigma(lambda_int)
-            return -np.inf
-        elif hyperparameters[4] < -0.5 or hyperparameters[4] > 0.5: #mu(beta_ani)
-            return -np.inf
-        elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(beta_ani)
-            return -np.inf
-        elif hyperparameters[6] < 1.5 or hyperparameters[6] > 2.5: #mu(gamma_lens)
-            return -np.inf
-        elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.2: #sigma(gamma_lens)
-            return -np.inf
-        
-        return 0
-    
-    def w0waCDM_log_prior(hyperparameters):
-        """
-        Args:
-            hyperparameters ([H0,Omega_M,w0,wa,mu_gamma,sigma_gamma])
-        """
-
-        # h0 [0,150]
-        if hyperparameters[0] < 0 or hyperparameters[0] > 150: 
-            return -np.inf
-        # Omega_M [0.05,0.5]
-        if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: 
-            return -np.inf
-        #w0 [-2,0]
-        elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
-            return -np.inf
-        #wa [-2,2]
-        elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
-            return -np.inf
-        #mu(gamma)
-        elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5:
-            return -np.inf
-        #sigma(gamma)
-        elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2:
-            return -np.inf
-        
-        return 0
-    
-    def generate_initial_state(n_walkers,cosmo_model):
-        """
-        Args:
-            n_walkers (int): number of emcee walkers
-            cosmo_model (string): 'LCDM' or 'w0waCDM'
-        """
-
-        if cosmo_model == 'LCDM':
-            # order: [H0,Omega_M,mu_gamma,sigma_gamma]
-            cur_state = np.empty((n_walkers,4))
-            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
-            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
-            cur_state[:,2] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
-            cur_state[:,3] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
-
-            return cur_state
-        
-        if cosmo_model == 'LCDM_lambda_int':
-            # order: [H0,Omega_M,mu_lambda_int,sigma_lambda_int,mu_gamma,sigma_gamma]
-            cur_state = np.empty((n_walkers,6))
-            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
-            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
-            cur_state[:,2] = uniform.rvs(loc=0.9,scale=0.2,size=n_walkers)
-            cur_state[:,3] = uniform.rvs(loc=0.001,scale=0.499,size=n_walkers)
-            cur_state[:,4] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
-            cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
-
-            return cur_state
-        
-        if cosmo_model == 'LCDM_lambda_int_beta_ani':
-            # order: [H0,Omega_M,mu_lambda_int,sigma_lambda_int,
-            #   mu_beta_ani,sigma_beta_ani,mu_gamma,sigma_gamma]
-            cur_state = np.empty((n_walkers,8))
-            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
-            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
-            cur_state[:,2] = uniform.rvs(loc=0.9,scale=0.2,size=n_walkers)
-            cur_state[:,3] = uniform.rvs(loc=0.001,scale=0.499,size=n_walkers)
-            cur_state[:,4] = uniform.rvs(loc=-0.1,scale=0.2,size=n_walkers)
-            cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
-            cur_state[:,6] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
-            cur_state[:,7] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
-
-            return cur_state
-        
-        elif cosmo_model == 'w0waCDM':
-            # order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
-            cur_state = np.empty((n_walkers,6))
-            cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
-            cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
-            cur_state[:,2] = uniform.rvs(loc=-1.5,scale=1.,size=n_walkers)
-            cur_state[:,3] = uniform.rvs(loc=-1,scale=2,size=n_walkers)
-            cur_state[:,4] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
-            cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.19,size=n_walkers)
-
-            return cur_state
-
-
-    
-    def log_posterior(hyperparameters):
-        """
-        Args:
-            hyperparameters ([float]): 
-                - LCDM: [H0,Omega_M,mu_gamma,sigma_gamma] 
-                - LCDM_lambda_int_beta_ani: [H0,Omega_M,
-                    mu_lint,sigma_lint,mu_bani,sigma_bani,mu_gamma,sigma_gamma] 
-                - w0waCDM: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
-        """
-        # Prior
-        if cosmo_model == 'LCDM':
-            lp = LCDM_log_prior(hyperparameters)
-        elif cosmo_model == 'LCDM_lambda_int':
-            lp = LCDM_lambda_int_log_prior(hyperparameters)
-        elif cosmo_model == 'LCDM_lambda_int_beta_ani':
-            lp = LCDM_lambda_int_beta_ani_log_prior(hyperparameters)
-        elif cosmo_model == 'w0waCDM':
-            lp = w0waCDM_log_prior(hyperparameters)
-        # Likelihood
-        if lp == 0:
-            for tdc_likelihood in tdc_likelihood_list:
-                fll = tdc_likelihood.full_log_likelihood(hyperparameters)
-                lp += fll
-
-        return lp
+            
+    log_posterior_fn = partial(log_posterior, cosmo_model=cosmo_model,
+        tdc_likelihood_list=tdc_likelihood_list)
 
     # generate initial state
     cur_state = generate_initial_state(n_walkers,cosmo_model)
     # emcee stuff here
-    sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior)
-
-    # run mcmc
-    tik_mcmc = time.time()
-    _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
-    tok_mcmc = time.time()
-    print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
-    
+    if not use_mpi:
+        sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn)
+        # run mcmc
+        tik_mcmc = time.time()
+        _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
+        tok_mcmc = time.time()
+        print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+    else: 
+        print("Using MPI for parallelization...")
+        from schwimmbad import MPIPool
+        with MPIPool() as pool:
+            if not pool.is_master():
+                pool.wait()
+                sys.exit(0)
+            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn, pool=pool)
+            # run mcmc
+            tik_mcmc = time.time()
+            _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
+            tok_mcmc = time.time()
+            print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+        
     return sampler.get_chain()

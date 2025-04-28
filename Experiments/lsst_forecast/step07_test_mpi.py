@@ -7,7 +7,13 @@ from matplotlib.lines import Line2D
 import sys
 sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/')
 import tdc_sampler
+import time
+import argparse
 
+parser = argparse.ArgumentParser(description="Run model with specific configurations.")
+parser.add_argument("--use-MPI", action="store_true", help="Use MPI for parallel processing.")
+args = parser.parse_args()
+use_MPI = args.use_MPI
 
 # USER SETTINGS HERE (TODO: change filepaths)
 np.random.seed(123)
@@ -19,7 +25,7 @@ data_vectors = {
         'sigma_v_measurement_error_kmpersec':5.
     }
 }
-NUM_EMCEE_SAMPS = 10
+NUM_EMCEE_SAMPS = 100
 USE_ASTROPY = True #use this flag to avoid jax_cosmo DDts 
 
 #############
@@ -244,6 +250,9 @@ quad_kin_lklhd_kappa_ext = tdc_sampler.TDCKinLikelihood(
 ###################
 # RUN MCMC HERE!!!
 ###################
+start = time.time()
 tenIFU_chain = tdc_sampler.fast_TDC([quad_kin_lklhd_kappa_ext],num_emcee_samps=NUM_EMCEE_SAMPS,
-    n_walkers=20)
+    n_walkers=20, use_mpi=use_MPI)
+end = time.time()
+print('Time to run MCMC:',end-start)
 
