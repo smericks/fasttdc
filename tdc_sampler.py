@@ -862,7 +862,7 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
     return lp
 
 def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
-    n_walkers=20, use_mpi=False):
+    n_walkers=20, use_mpi=False, backend_path=None):
     """
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
@@ -870,6 +870,7 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
         num_emcee_samps (int): Number of iterations for MCMC inference
         n_walkers (int): Number of emcee walkers
         use_mpi (bool): If True, uses MPI for parallelization
+        backend_path (string): If not None, saves a backend .h5 file
         
     Returns: 
         mcmc chain (emcee.EnsemblerSampler.chain)
@@ -893,7 +894,14 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
         #print("Using multiprocessing for parallelization...")
         #print("Number of CPUs: %d"%cpu_count)
         #with Pool() as pool:
-        sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn)
+
+        backend = None
+        if backend_path is not None:
+            backend = emcee.backends.HDFBackend(backend_path)
+            backend.reset(n_walkers,cur_state.shape[1])
+
+        sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
+            log_posterior_fn,backend=backend)
         # run mcmc
         tik_mcmc = time.time()
         _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
