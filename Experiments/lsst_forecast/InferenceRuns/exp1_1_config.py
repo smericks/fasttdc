@@ -7,18 +7,17 @@ gold_quads_h5_file = 'DataVectors/gold/quad_posteriors_KIN.h5'
 gold_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_KIN.h5'
 gold_metadata_file = 'DataVectors/gold/truth_metadata.csv'
 
-# catalog indices available
-with h5py.File(gold_quads_h5_file,'r') as h5:
-    quad_catalog_idxs = h5['catalog_idxs'][:]
-with h5py.File(gold_dbls_h5_file,'r') as h5:
-    dbl_catalog_idxs = h5['catalog_idxs'][:]
-
-
 NUM_FPD_SAMPS = 5000
 NUM_MCMC_EPOCHS = 5
 NUM_MCMC_WALKERS = 20
 COSMO_MODEL = 'LCDM_lambda_int_beta_ani'
 BACKEND_PATH = 'InferenceRuns/exp1_1/baseline_backend.h5'
+
+# catalog indices available
+with h5py.File(gold_quads_h5_file,'r') as h5:
+    quad_catalog_idxs = h5['catalog_idxs'][:]
+with h5py.File(gold_dbls_h5_file,'r') as h5:
+    dbl_catalog_idxs = h5['catalog_idxs'][:]
 
 likelihood_configs = {
 

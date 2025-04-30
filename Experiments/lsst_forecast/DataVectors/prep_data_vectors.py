@@ -8,15 +8,6 @@ sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/'
 import tdc_sampler
 
 
-data_vector_dicts = {
-    'gold_quads':{
-        'h5_file':'DataVectors/gold/quad_posteriors_KIN.h5',
-        'metadata_file':'DataVectors/gold/truth_metadata.csv',
-        'td_measurement_error_days':5.,
-        'sigma_v_measurement_error_kmpersec':5.
-    }
-}
-
 # NOTE: hard-coded modeling priors (can change later)
 GAMMA_LENS_PRIOR = norm(loc=2.,scale=0.2).logpdf
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
@@ -299,7 +290,7 @@ def emulate_measurements(sigma_v_truth,
     # construct array of measurement errors
     # meas_sigma has shape (n_lenses,n_kin_bins)
     if measurement_error_percent is not None:
-        meas_sigma = measurement_error_percent*sigma_v_truth
+        meas_sigma = measurement_error_percent*np.abs(sigma_v_truth) # must be a positive number!!
     elif measurement_error_kmpersec is not None:
         meas_sigma = measurement_error_kmpersec*np.ones(np.shape(sigma_v_truth))  
 
