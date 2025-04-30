@@ -107,10 +107,11 @@ def populate_truth_Ddt_timedelays(metadata_df,gt_cosmo_astropy):
 
     # for doubles, will just write in a nan...
     for j in range(0,3):
-        metadata_df['td0'+str(j+1)] = tdc_utils.td_from_ddt_fpd(
+        td_truth = tdc_utils.td_from_ddt_fpd(
             metadata_df['Ddt_Mpc'],
             metadata_df['fpd0'+str(j+1)])
-        
+        metadata_df['td0'+str(j+1)] = metadata_df['lambda_int']*td_truth
+
 def populate_truth_sigma_v_4MOST(metadata_df,gt_cosmo_astropy):
     """Using ground truth lens properties + a ground truth cosmology, computes
         the velocity dispersion in the 4MOST R=0.725" aperture
@@ -127,8 +128,12 @@ def populate_truth_sigma_v_4MOST(metadata_df,gt_cosmo_astropy):
             metadata_df.loc[r,'lens_light_parameters_n_sersic'],
             metadata_df.loc[r,'main_deflector_parameters_z_lens'],
             metadata_df.loc[r,'source_parameters_z_source'],
-            gt_cosmo_astropy)
+            gt_cosmo_astropy,
+            beta_ani=metadata_df.loc[r,'beta_ani'])
         # write in the value!
+
+        sigma_v *= np.sqrt(metadata_df.loc[r,'lambda_int'])
+
         metadata_df.loc[r,'sigma_v_4MOST_kmpersec'] = sigma_v
 
 
@@ -151,8 +156,12 @@ def populate_truth_sigma_v_IFU(metadata_df,gt_cosmo_astropy):
             metadata_df.loc[r,'lens_light_parameters_n_sersic'],
             metadata_df.loc[r,'main_deflector_parameters_z_lens'],
             metadata_df.loc[r,'source_parameters_z_source'],
-            gt_cosmo_astropy
+            gt_cosmo_astropy,
+            beta_ani=metadata_df.loc[r,'beta_ani']
         )
+        # lambda_int scaling
+        sigma_v_muse *= np.sqrt(metadata_df.loc[r,'lambda_int'])
+
         # write in the value!
         for b in range(0,len(sigma_v_muse)):
             metadata_df.loc[r,'sigma_v_MUSE_bin%d_kmpersec'%(b)] = sigma_v_muse[b]
@@ -166,8 +175,12 @@ def populate_truth_sigma_v_IFU(metadata_df,gt_cosmo_astropy):
             metadata_df.loc[r,'lens_light_parameters_n_sersic'],
             metadata_df.loc[r,'main_deflector_parameters_z_lens'],
             metadata_df.loc[r,'source_parameters_z_source'],
-            gt_cosmo_astropy
+            gt_cosmo_astropy,
+            beta_ani=metadata_df.loc[r,'beta_ani']
         )
+        # lambda_int scaling
+        sigma_v_nirspec *= np.sqrt(metadata_df.loc[r,'lambda_int'])
+
         # write in the value!
         for b in range(0,len(sigma_v_nirspec)):
             metadata_df.loc[r,'sigma_v_NIRSPEC_bin%d_kmpersec'%(b)] = sigma_v_nirspec[b]
