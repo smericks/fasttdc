@@ -56,11 +56,14 @@ def retrieve_truth_kin(metadata_df,kinematic_type):
 
     raise ValueError("kinematic_type not supported")
 
-def gaussianize_samples(input_samps,num_gaussian_samps=5000):
+def gaussianize_samples(input_samps,num_gaussian_samps=5000,
+    gt_for_debiasing=None):
     """takes in input samples, fits a Gaussian, and returns new samples
         from that Gaussian
     Args:
         input_samps (n_input_samps,n_params)
+        gt_for_debiasing (n_params): Default is None, no de-biasing. We must 
+            have access to ground truth to de-bias.
     Returns:
         output_samps (n_gaussian_samps,n_params)
     """
@@ -68,10 +71,47 @@ def gaussianize_samples(input_samps,num_gaussian_samps=5000):
     Mu = np.mean(input_samps,axis=0)
     Cov = np.cov(input_samps,rowvar=False)
 
+    # de-bias if requested
+    if gt_for_debiasing is not None:
+        Mu = multivariate_normal.rvs(mean=gt_for_debiasing,cov=Cov)
+
     gaussianized_samps = multivariate_normal.rvs(mean=Mu,cov=Cov,
         size=num_gaussian_samps)
 
     return gaussianized_samps
+
+def gaussianize_scale_and_debias(input_samps,
+    desired_param_prec,desired_param_idx,gt_for_debiasing,
+    num_gaussian_samps=5000):
+    """
+    Args:
+        input_samps (n_input_samps,n_params)
+        desired_param_prec: fractional percent error on a chosen parameter
+        desired_param_idx: index of this parameter in input_samps and 
+            gt_for_debiasing
+        gt_for_debiasing: must have access to ground truth to de-bias
+        num_gaussian_samps (int)
+    """
+
+
+    Mu = np.mean(input_samps,axis=0)
+    Cov = np.cov(input_samps,rowvar=False)
+
+    # re-scale based on desired precision of a chosen parameter
+    current_std = np.sqrt(Cov[desired_param_idx,desired_param_idx])
+    desired_std_gamma = gt_for_debiasing[desired_param_idx]*desired_param_prec
+    Cov *= (desired_std_gamma/current_std)**2
+
+    # debiasing is required to avoid over/under confident posteriors
+    Mu = multivariate_normal.rvs(mean=gt_for_debiasing,cov=Cov)
+
+    # now, take new samples!
+    gaussianized_samps = multivariate_normal.rvs(mean=Mu,cov=Cov,
+        size=num_gaussian_samps)
+
+    return gaussianized_samps
+
+
 
 #############################
 # Construct likelihood object
@@ -79,6 +119,7 @@ def gaussianize_samples(input_samps,num_gaussian_samps=5000):
 
 def construct_likelihood_obj(
     posteriors_h5_file,metadata_file,catalog_idxs,
+    cosmo_model,
     td_meas_error_percent=None,td_meas_error_days=None,
     kappa_ext_meas_error_value=0.05,
     kinematic_type=None,
@@ -90,6 +131,7 @@ def construct_likelihood_obj(
         metadata_file ()
         catalog_idxs (np.array[int]): catalog indices of the subset of lenses 
             used from these files
+        cosmo_model (str): Options are 'LCDM', etc...
         kinematic_type (string): Default=None. Options are: '4MOST', 'MUSE', or 'NIRSPEC'
         num_gaussianized_samps (int): Default=None (use samples as is). If specified,
             a Gaussian will be fit to the provided samples, and a new batch of 
@@ -208,7 +250,7 @@ def construct_likelihood_obj(
             kappa_ext_samples=kappa_ext_samps,
             z_lens=metadata_df.loc[:,'main_deflector_parameters_z_lens'].to_numpy(),
             z_src=metadata_df.loc[:,'source_parameters_z_source'].to_numpy(),
-            cosmo_model=COSMO_MODEL,
+            cosmo_model=cosmo_model,
             log_prob_gamma_nu_int=GAMMA_LENS_PRIOR,
             log_prob_beta_ani_nu_int=BETA_ANI_PRIOR)
 
@@ -222,7 +264,7 @@ def construct_likelihood_obj(
             kappa_ext_samples=kappa_ext_samps,
             z_lens=metadata_df.loc[:,'main_deflector_parameters_z_lens'].to_numpy(),
             z_src=metadata_df.loc[:,'source_parameters_z_source'].to_numpy(),
-            cosmo_model=COSMO_MODEL,
+            cosmo_model=cosmo_model,
             log_prob_gamma_nu_int=GAMMA_LENS_PRIOR,
             log_prob_beta_ani_nu_int=BETA_ANI_PRIOR)
 
