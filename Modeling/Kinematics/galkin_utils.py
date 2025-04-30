@@ -129,13 +129,13 @@ kinematicsAPI_NIRSPEC = setup_NIRSPEC_kinematics()
 #####################
 
 def ground_truth_veldisp(theta_E,gamma_lens,R_sersic,n_sersic,
-    z_lens,z_src,gt_cosmo_astropy):
+    z_lens,z_src,gt_cosmo_astropy,beta_ani=0.):
 
     default_distance_ratio = np.sqrt(
         kinematicsAPI_4MOST._kwargs_cosmo['d_s'] / 
         kinematicsAPI_4MOST._kwargs_cosmo['d_ds'])
 
-    kwargs_anisotropy = {'beta': 0.}
+    kwargs_anisotropy = {'beta': beta_ani}
 
     kwargs_lens = [{
         'theta_E':theta_E, 
@@ -200,7 +200,7 @@ def ground_truth_c_sqrtJ(theta_E,gamma_lens,R_sersic,n_sersic,beta_ani):
 #######################
 
 def ground_truth_ifu_vdisp(ifu_api,theta_E,gamma_lens,R_sersic,n_sersic,
-    z_lens,z_src,gt_cosmo_astropy):
+    z_lens,z_src,gt_cosmo_astropy,beta_ani=0.):
     """
     Args:
         ifu_api (kinematicsAPI_MUSE or kinematicsAPI_NIRSPEC)
@@ -213,7 +213,7 @@ def ground_truth_ifu_vdisp(ifu_api,theta_E,gamma_lens,R_sersic,n_sersic,
             ifu_api._kwargs_cosmo['d_s'] / 
             ifu_api._kwargs_cosmo['d_ds'])
 
-    kwargs_anisotropy = {'beta': 0.}
+    kwargs_anisotropy = {'beta': beta_ani}
 
     kwargs_lens = [{
         'theta_E':theta_E, 
