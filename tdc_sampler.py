@@ -22,6 +22,8 @@ cosmo_models available:
     'w0waCDM': [H0,OmegaM,w0,wa,mu(gamma_lens),sigma(gamma_lens)]
     'LCDM_lambda_int': [H0,OmegaM,mu(lambda_int),sigma(lambda_int),
         mu(gamma_lens),sigma(gamma_lens)]
+    'LCDM_lambda_int_beta_ani'
+    'w0waCDM_lambda_int_beta_ani'
 """
 
 ###########################
@@ -70,9 +72,10 @@ class TDCLikelihood():
         self.z_lens = np.squeeze(np.asarray(z_lens))
         self.z_src = np.squeeze(np.asarray(z_src))
         if cosmo_model not in ['LCDM','LCDM_lambda_int',
-            'LCDM_lambda_int_beta_ani','w0waCDM']:
+            'LCDM_lambda_int_beta_ani','w0waCDM','w0waCDM_lambda_int_beta_ani']:
             raise ValueError("choose from available cosmo_models: "+
-                "LCDM, LCDM_lambda_int, LCDM_lambda_int_beta_ani, w0waCDM")
+                "LCDM, LCDM_lambda_int, LCDM_lambda_int_beta_ani, w0waCDM, "+
+                "w0waCDM_lambda_int_beta_ani")
         self.cosmo_model = cosmo_model
         self.use_gamma_info = use_gamma_info
         self.use_astropy = use_astropy
@@ -224,7 +227,7 @@ class TDCLikelihood():
          'LCDM_lambda_int_beta_ani'] :
              w0_input = -1.
              wa_input = 0.
-        elif self.cosmo_model == 'w0waCDM':
+        elif self.cosmo_model in ['w0waCDM','w0waCDM_lambda_int_beta_ani']:
              w0_input = hyperparameters[2]
              wa_input = hyperparameters[3]
 
@@ -269,6 +272,11 @@ class TDCLikelihood():
             mu_lint = hyperparameters[-4]
             sigma_lint = hyperparameters[-3]
         elif self.cosmo_model == 'LCDM_lambda_int_beta_ani':
+            # NOTE: hardcoding of hyperparameter order!! (-6 is mu, -5 is sigma)
+            mu_lint = hyperparameters[-6]
+            sigma_lint = hyperparameters[-5]
+            # truncating to avoid values below 0 (unphysical)
+        elif self.cosmo_model == 'w0waCDM_lambda_int_beta_ani':
             # NOTE: hardcoding of hyperparameter order!! (-6 is mu, -5 is sigma)
             mu_lint = hyperparameters[-6]
             sigma_lint = hyperparameters[-5]
@@ -472,11 +480,11 @@ class TDCKinLikelihood(TDCLikelihood):
             np.sqrt(np.linalg.det(np.linalg.inv(self.sigma_v_likelihood_prec))))
         
         # TODO
-        if cosmo_model == 'LCDM_lambda_int_beta_ani':
+        if cosmo_model in ['LCDM_lambda_int_beta_ani','w0waCDM_lambda_int_beta_ani']:
             # check that beta_ani_samples are provided...
             if beta_ani_samples is None:
                 raise ValueError('Must provide beta_ani_samples if using '+
-                    'cosmo_model LCDM_lambda_int_beta_ani')
+                    'beta_ani in cosmo_model')
             
             self.beta_ani_samples = beta_ani_samples
             # handle beta_ani hierarchically
@@ -630,7 +638,7 @@ class TDCKinLikelihood(TDCLikelihood):
         else:
             rw_factor = 0.
 
-        if self.cosmo_model == 'LCDM_lambda_int_beta_ani':
+        if self.cosmo_model in ['LCDM_lambda_int_beta_ani','w0waCDM_lambda_int_beta_ani']:
             eval_at_proposed_beta_pop = norm.logpdf(self.beta_ani_samples,
                 loc=hyperparameters[-4],scale=hyperparameters[-3])
             beta_rw_factor = eval_at_proposed_beta_pop - self.log_prob_beta_ani_nu_int
@@ -774,6 +782,38 @@ def w0waCDM_log_prior(hyperparameters):
     
     return 0
 
+def w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
+    """
+    Args:
+        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
+            mu_gamma,sigma_gamma])
+    """
+
+    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+        return -np.inf
+    elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+        return -np.inf
+    #w0 [-2,0]
+    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
+        return -np.inf
+    #wa [-2,2]
+    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
+        return -np.inf
+    elif hyperparameters[4] < 0.5 or hyperparameters[4] > 1.5: #mu(lambda_int)
+        return -np.inf
+    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.5: #sigma(lambda_int)
+        return -np.inf
+    elif hyperparameters[6] < -0.5 or hyperparameters[6] > 0.5: #mu(beta_ani)
+        return -np.inf
+    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.2: #sigma(beta_ani)
+        return -np.inf
+    elif hyperparameters[8] < 1.5 or hyperparameters[8] > 2.5: #mu(gamma_lens)
+        return -np.inf
+    elif hyperparameters[9] < 0.001 or hyperparameters[9] > 0.2: #sigma(gamma_lens)
+        return -np.inf
+    
+    return 0
+
 def generate_initial_state(n_walkers,cosmo_model):
     """
     Args:
@@ -829,6 +869,23 @@ def generate_initial_state(n_walkers,cosmo_model):
         cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.19,size=n_walkers)
 
         return cur_state
+    
+    if cosmo_model == 'w0waCDM_lambda_int_beta_ani':
+        # order: [H0,Omega_M,w0,wa,mu_lambda_int,sigma_lambda_int,
+        #   mu_beta_ani,sigma_beta_ani,mu_gamma,sigma_gamma]
+        cur_state = np.empty((n_walkers,8))
+        cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
+        cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
+        cur_state[:,2] = uniform.rvs(loc=-1.5,scale=1.,size=n_walkers) #w0
+        cur_state[:,3] = uniform.rvs(loc=-1,scale=2,size=n_walkers) #wa
+        cur_state[:,4] = uniform.rvs(loc=0.9,scale=0.2,size=n_walkers)
+        cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.499,size=n_walkers)
+        cur_state[:,6] = uniform.rvs(loc=-0.1,scale=0.2,size=n_walkers)
+        cur_state[:,7] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+        cur_state[:,8] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
+        cur_state[:,9] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+
+        return cur_state
 
 
 
@@ -853,6 +910,8 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
         lp = LCDM_lambda_int_beta_ani_log_prior(hyperparameters)
     elif cosmo_model == 'w0waCDM':
         lp = w0waCDM_log_prior(hyperparameters)
+    elif cosmo_model == 'w0waCDM_lambda_int_beta_ani':
+        lp = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
     # Likelihood
     if lp == 0:
         for tdc_likelihood in tdc_likelihood_list:
