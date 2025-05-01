@@ -110,6 +110,7 @@ def populate_truth_Ddt_timedelays(metadata_df,gt_cosmo_astropy):
         td_truth = tdc_utils.td_from_ddt_fpd(
             metadata_df['Ddt_Mpc'],
             metadata_df['fpd0'+str(j+1)])
+        # lambda_int scaling!!
         metadata_df['td0'+str(j+1)] = metadata_df['lambda_int']*td_truth
 
 def populate_truth_sigma_v_4MOST(metadata_df,gt_cosmo_astropy):

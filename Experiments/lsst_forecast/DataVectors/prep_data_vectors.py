@@ -14,6 +14,15 @@ BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
 COSMO_MODEL = 'LCDM_lambda_int_beta_ani'
 
 
+def retrieve_truth_fpd(metadata_df,num_td):
+    if num_td == 1: 
+        fpd_truth = metadata_df.loc[:,['fpd01']].to_numpy()
+    elif num_td == 3:
+        fpd_truth = metadata_df.loc[:,['fpd01','fpd02','fpd03']].to_numpy()
+
+    return fpd_truth
+
+
 def retrieve_truth_td(metadata_df,num_td):
     if num_td == 1: 
         # NOTE: will this keep the last dim=(..,..,1) ? 
@@ -115,7 +124,8 @@ def construct_likelihood_obj(
     kappa_ext_meas_error_value=0.05,
     kinematic_type=None,
     kin_meas_error_percent=None,kin_meas_error_kmpersec=None,
-    num_gaussianized_samps=None):
+    num_gaussianized_samps=None,
+    gaussianize_scale_debias_kwargs=None):
     """
     Args:
         posteriors_h5_file ()
@@ -127,6 +137,12 @@ def construct_likelihood_obj(
         num_gaussianized_samps (int): Default=None (use samples as is). If specified,
             a Gaussian will be fit to the provided samples, and a new batch of 
             |num_gaussianized_samps| samples will be drawn from that distribution 
+        gaussianize_scale_debias_kwargs (dict): Default = None (not used). If specified,
+            will call gaussianize_scale_and_debias() to:
+                1) Gaussianize
+                2) Re-scale covariance matrix s.t. a parameter has a desired precision
+                3) De-bias the mean of the prediction to avoid over/under confidence
+            This allows us to make "higher fidelity" models from the NPE models
         
     """
 
@@ -190,16 +206,26 @@ def construct_likelihood_obj(
     # gaussianize samples if requested
     if num_gaussianized_samps is not None:
         to_gaussianize_input = []
+        gt_params = [] # (n_lenses,n_params)
         # fpds
+        fpd_truth = retrieve_truth_fpd(metadata_df,num_td)
         for i in range(0,num_td):
             to_gaussianize_input.append(fpd_samps[:,:,i])
+            gt_params.append(fpd_truth[:,i])
         # gamma_lens
         to_gaussianize_input.append(lens_param_samps[:,:,3])
         gamma_idx = num_td
+        gamma_truth = metadata_df.loc[:,'main_deflector_parameters_gamma'].to_numpy()
+        gt_params.append(gamma_truth)
+
+        # kinematics
         if kinematic_type is not None:
             # beta_ani
             to_gaussianize_input.append(beta_ani_samps)
             beta_idx = num_td+1
+            # NOTE: beta_truth has to be centered at zero (keep modeling prior)
+            beta_truth = np.zeros(np.shape(gamma_truth))
+            gt_params.append(beta_truth)
             # sigma_v bins
             for j in range(0,num_kin_bins):
                 to_gaussianize_input.append(c_sqrtJ_samps[:,:,j])
@@ -256,8 +282,7 @@ def construct_likelihood_obj(
             z_lens=metadata_df.loc[:,'main_deflector_parameters_z_lens'].to_numpy(),
             z_src=metadata_df.loc[:,'source_parameters_z_source'].to_numpy(),
             cosmo_model=cosmo_model,
-            log_prob_gamma_nu_int=GAMMA_LENS_PRIOR,
-            log_prob_beta_ani_nu_int=BETA_ANI_PRIOR)
+            log_prob_gamma_nu_int=GAMMA_LENS_PRIOR)
 
 
     return likelihood_obj
