@@ -862,7 +862,7 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
     return lp
 
 def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
-    n_walkers=20, use_mpi=False, backend_path=None):
+    n_walkers=20, use_mpi=False, backend_path=None, reset_backend=True):
     """
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
@@ -898,7 +898,9 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
         backend = None
         if backend_path is not None:
             backend = emcee.backends.HDFBackend(backend_path)
-            backend.reset(n_walkers,cur_state.shape[1])
+            # if False, will pick-up where chain left off
+            if reset_backend:
+                backend.reset(n_walkers,cur_state.shape[1])
 
         sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
             log_posterior_fn,backend=backend)
