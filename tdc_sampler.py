@@ -873,7 +873,7 @@ def generate_initial_state(n_walkers,cosmo_model):
     if cosmo_model == 'w0waCDM_lambda_int_beta_ani':
         # order: [H0,Omega_M,w0,wa,mu_lambda_int,sigma_lambda_int,
         #   mu_beta_ani,sigma_beta_ani,mu_gamma,sigma_gamma]
-        cur_state = np.empty((n_walkers,8))
+        cur_state = np.empty((n_walkers,10))
         cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
         cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
         cur_state[:,2] = uniform.rvs(loc=-1.5,scale=1.,size=n_walkers) #w0
