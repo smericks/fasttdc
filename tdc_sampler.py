@@ -44,8 +44,7 @@ def jax_lenses_summation(individ_likelihood):
 
 class TDCLikelihood():
 
-    def __init__(self, fpd_sample_shape,
-                 log_prob_gamma_nu_int=None, cosmo_model='LCDM',
+    def __init__(self, fpd_sample_shape, cosmo_model='LCDM',
                  use_gamma_info=True, use_astropy=False):
         """
         Keep track of quantities that remain constant throughout the inference
@@ -87,7 +86,6 @@ class TDCLikelihood():
         self.use_astropy = use_astropy
         # make sure the dims are right
         self.num_lenses, self.num_fpd_samples, self.dim_fpd = fpd_sample_shape
-        self.log_prob_gamma_nu_int = log_prob_gamma_nu_int
 
     # compute predicted time delays from predicted fermat potential differences
     # requires an assumed cosmology (from hyperparameters) and redshifts
@@ -305,7 +303,7 @@ class TDCLikelihood():
         if self.use_gamma_info:
             eval_at_proposed_nu = norm.logpdf(data_vector_global[index_likelihood_list]['gamma_pred_samples'],
                                               loc=hyperparameters[-2], scale=hyperparameters[-1])
-            rw_factor = eval_at_proposed_nu - data_vector_global[index_likelihood_list]['log_prob_modeling_prior']
+            rw_factor = eval_at_proposed_nu - data_vector_global[index_likelihood_list]['log_prob_gamma_samps_nu_int']
         else:
             rw_factor = 0.
 
@@ -386,11 +384,13 @@ class TDCLikelihood():
 
         # return chain
         return sampler.get_chain()
+    
+
+
 class TDCKinLikelihood(TDCLikelihood):
 
     def __init__(self, fpd_sample_shape, kin_pred_samples_shape,
-                 log_prob_gamma_nu_int=None ,cosmo_model='LCDM' ,use_gamma_info=True,
-                 log_prob_beta_ani_nu_int=None,
+                 cosmo_model='LCDM' ,use_gamma_info=True,
                  use_astropy=False):
         """
         Keep track of quantities that remain constant throughout the inference
@@ -406,15 +406,12 @@ class TDCKinLikelihood(TDCLikelihood):
                 return the prior then...)
             beta_ani_samples (): None if beta_ani not in population model
                 (n_lenses,n_fpd_samples)
-            log_prob_beta_ani_nu_int: TODO
         """
 
-        super().__init__(fpd_sample_shape,
-                         log_prob_gamma_nu_int ,cosmo_model ,use_gamma_info,
+        super().__init__(fpd_sample_shape, cosmo_model ,use_gamma_info,
                          use_astropy)
 
         self.num_kin_bins = kin_pred_samples_shape[2]
-        self.log_prob_beta_ani_nu_int = log_prob_beta_ani_nu_int
 
 
     def sigma_v_pred_from_kin_pred(self ,proposed_cosmo,index_likelihood_list, lambda_int_samples=None):
@@ -552,14 +549,14 @@ class TDCKinLikelihood(TDCLikelihood):
         if self.use_gamma_info:
             eval_at_proposed_nu = norm.logpdf(data_vector_global[index_likelihood_list]['gamma_pred_samples'],
                                               loc=hyperparameters[-2] ,scale=hyperparameters[-1])
-            rw_factor = eval_at_proposed_nu - data_vector_global[index_likelihood_list]['log_prob_modeling_prior']
+            rw_factor = eval_at_proposed_nu - data_vector_global[index_likelihood_list]['log_prob_gamma_samps_nu_int']
         else:
             rw_factor = 0.
 
         if self.cosmo_model in ['LCDM_lambda_int_beta_ani' ,'w0waCDM_lambda_int_beta_ani']:
             eval_at_proposed_beta_pop = norm.logpdf(data_vector_global[index_likelihood_list]['beta_ani_samples'],
                                                     loc=hyperparameters[-4] ,scale=hyperparameters[-3])
-            beta_rw_factor = eval_at_proposed_beta_pop - data_vector_global[index_likelihood_list]['log_prob_beta_ani_nu_int']
+            beta_rw_factor = eval_at_proposed_beta_pop - data_vector_global[index_likelihood_list]['log_prob_beta_ani_samps_nu_int']
             rw_factor += beta_rw_factor
 
         # TODO: testing some jitting here (jit doesn't like the ==0 statement)
@@ -914,9 +911,11 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
         if tdc_likelihood_list[i].cosmo_model != cosmo_model:
             raise ValueError("")
 
+    # TODO: prepare the data vectors
+
     # make the variable global to speed up multiprocessing access during the sampling
     global data_vector_global
-    data_vector_global = prepare_data_vector_list(data_vector_list, tdc_likelihood_list)
+    data_vector_global = data_vector_list
 
     log_posterior_fn = partial(log_posterior, cosmo_model=cosmo_model,
         tdc_likelihood_list=tdc_likelihood_list)
