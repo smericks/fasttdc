@@ -1,11 +1,12 @@
 import h5py
 import pandas as pd
 import numpy as np
-import corner
+import os
 from scipy.stats import norm, multivariate_normal, gaussian_kde
 from matplotlib.lines import Line2D
 import sys
-sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/')
+dirname = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(dirname, '../..'))
 import tdc_sampler
 import time
 import argparse
