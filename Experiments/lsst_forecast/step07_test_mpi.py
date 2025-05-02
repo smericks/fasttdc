@@ -23,6 +23,16 @@ use_multiprocess = args.use_multiprocess
 # USER SETTINGS HERE (TODO: change filepaths)
 static_dv_filepath = 'DataVectors/gold/mpi_test.json'
 np.random.seed(123)
+print(np.random.uniform(0,1))
+
+data_vectors = {
+    'gold_quads':{
+        'h5_file':'DataVectors/gold/quad_posteriors_KIN.h5',
+        'metadata_file':'DataVectors/gold/truth_metadata.csv',
+        'td_measurement_error_days':5.,
+        'sigma_v_measurement_error_kmpersec':5.
+    }
+}
 NUM_EMCEE_SAMPS = 10
 USE_ASTROPY = True #use this flag to avoid jax_cosmo DDts 
 
