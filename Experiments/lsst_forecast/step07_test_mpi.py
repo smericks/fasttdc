@@ -21,6 +21,8 @@ use_multiprocess = args.use_multiprocess
 
 # USER SETTINGS HERE (TODO: change filepaths)
 np.random.seed(123)
+print(np.random.uniform(0,1))
+
 data_vectors = {
     'gold_quads':{
         'h5_file':'DataVectors/gold/quad_posteriors_KIN.h5',
