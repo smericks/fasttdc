@@ -954,7 +954,7 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     log_posterior(hyperparameters_init, 'LCDM_lambda_int_beta_ani',
                   tdc_likelihood_list)
     print('log_posterior', log_posterior(hyperparameters_init, cosmo_model, tdc_likelihood_list))
-    print('expected : log_posterior -10803.707955019949')
+    print('expected : log_posterior -1309.0113851331898')
 
     # emcee stuff here
     if not use_mpi:

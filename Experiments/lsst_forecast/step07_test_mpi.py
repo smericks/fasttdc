@@ -206,21 +206,21 @@ def gaussianize_samples(input_samps,num_gaussian_samps=5000):
 #########################
 # Construct likelihood.
 #########################
-input_samps_array = np.stack((data_vectors['gold_quads']['fpd_samps'][:100,:,0],
-    data_vectors['gold_quads']['fpd_samps'][:100,:,1],
-    data_vectors['gold_quads']['fpd_samps'][:100,:,2],
-    data_vectors['gold_quads']['lens_param_samps'][:100,:,3],
-    data_vectors['gold_quads']['beta_ani_samps'][:100],
-    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:100,:,0],
-    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:100,:,1],
-    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:100,:,2],
-    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:100,:,3],
-    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:100,:,4],
-    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:100,:,5],
-    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:100,:,6],
-    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:100,:,7],
-    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:100,:,8],
-    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:100,:,9]),axis=-1)
+input_samps_array = np.stack((data_vectors['gold_quads']['fpd_samps'][:10,:,0],
+    data_vectors['gold_quads']['fpd_samps'][:10,:,1],
+    data_vectors['gold_quads']['fpd_samps'][:10,:,2],
+    data_vectors['gold_quads']['lens_param_samps'][:10,:,3],
+    data_vectors['gold_quads']['beta_ani_samps'][:10],
+    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:10,:,0],
+    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:10,:,1],
+    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:10,:,2],
+    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:10,:,3],
+    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:10,:,4],
+    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:10,:,5],
+    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:10,:,6],
+    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:10,:,7],
+    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:10,:,8],
+    data_vectors['gold_quads']['NIRSPEC_c_sqrtJ_samps'][:10,:,9]),axis=-1)
 
 num_lenses = input_samps_array.shape[0]
 num_params = input_samps_array.shape[-1]
@@ -231,17 +231,17 @@ for lens_idx in range(0,num_lenses):
 
 # tdc_sampler likelihood object
 quad_kin_lklhd_kappa_ext = tdc_sampler.TDCKinLikelihood(
-    td_measured=data_vectors['gold_quads']['td_measured'][:100],
-    td_likelihood_prec=data_vectors['gold_quads']['td_measurement_prec'][:100],
-    sigma_v_measured=data_vectors['gold_quads']['NIRSPEC_sigma_v_measured'][:100],
-    sigma_v_likelihood_prec=data_vectors['gold_quads']['NIRSPEC_sigma_v_measurement_prec'][:100],
+    td_measured=data_vectors['gold_quads']['td_measured'][:10],
+    td_likelihood_prec=data_vectors['gold_quads']['td_measurement_prec'][:10],
+    sigma_v_measured=data_vectors['gold_quads']['NIRSPEC_sigma_v_measured'][:10],
+    sigma_v_likelihood_prec=data_vectors['gold_quads']['NIRSPEC_sigma_v_measurement_prec'][:10],
     fpd_samples=output_samps_array[:,:,0:3],
     gamma_pred_samples=output_samps_array[:,:,3],
     beta_ani_samples=output_samps_array[:,:,4],
     kin_pred_samples=output_samps_array[:,:,5:],
-    kappa_ext_samples=data_vectors['gold_quads']['kappa_ext_samps'][:100],
-    z_lens=data_vectors['gold_quads']['z_lens'][:100],
-    z_src=data_vectors['gold_quads']['z_src'][:100],
+    kappa_ext_samples=data_vectors['gold_quads']['kappa_ext_samps'][:10],
+    z_lens=data_vectors['gold_quads']['z_lens'][:10],
+    z_src=data_vectors['gold_quads']['z_src'][:10],
     cosmo_model='LCDM_lambda_int_beta_ani',
     log_prob_gamma_nu_int=gamma_kde,
     log_prob_beta_ani_nu_int=beta_ani_modeling_prior,
