@@ -11,6 +11,9 @@ from scipy.stats import norm, truncnorm, uniform
 import Utils.tdc_utils as tdc_utils
 
 USE_JAX = False
+
+if USE_JAX:
+    import tdc_jax_utils as jax_utils
 """
 cosmo_models available: 
     'LCDM': [H0,OmegaM,mu(gamma_lens),sigma(gamma_lens)]
@@ -28,19 +31,6 @@ cosmo_models available:
 # I think we want this to be a class, so we can keep track of quantities
 # internally 
 
-@jax.jit
-def jax_fpd_samp_summation(log_likelihoood_per_samp):
-    """
-        log_likelihood_per_samp (n_lenses,n_fpd_samps)
-    """
-    return jnp.mean(jnp.exp(log_likelihoood_per_samp),axis=1)
-
-@jax.jit
-def jax_lenses_summation(individ_likelihood):
-    """
-        individ_likelihood (n_lenses)
-    """
-    return jnp.sum(jnp.log(individ_likelihood))
 
 class TDCLikelihood():
 
@@ -159,35 +149,6 @@ class TDCLikelihood():
         # log-likelihood
         return data_vector_global[index_likelihood_list]['td_likelihood_prefactors'] + exponent
 
-    # TDC Likelihood per lens per fpd sample (only condense along num. images dim.)
-    # TODO: jaxify & jit
-    @staticmethod
-    @jax.jit
-    def jax_td_log_likelihood_per_samp(td_pred_samples, td_measured,
-                                       td_likelihood_prec, td_likelihood_prefactors):
-        """
-        Args:
-            td_pred_samples (n_lenses,n_fpd_samps,n_td)
-            td_measured (n_lenses,n_fpd_samps,n_td)
-            td_likelihood_prec (n_lenses,n_fpd_samps,n_td,n_td)
-            td_likelihood_prefactor (n_lenses,n_fpd_samps)
-
-        Returns:
-            td_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
-        """
-
-        x_minus_mu = (td_pred_samples - td_measured)
-        # add dimension s.t. x_minus_mu is 2D
-        x_minus_mu = jnp.expand_dims(x_minus_mu, axis=-1)
-        # matmul should condense the (# of time delays) dim.
-        exponent = -0.5 * jnp.matmul(jnp.transpose(x_minus_mu, axes=(0, 1, 3, 2)),
-                                     jnp.matmul(td_likelihood_prec, x_minus_mu))
-
-        # reduce to two dimensions: (n_lenses,n_fpd_samples)
-        exponent = jnp.squeeze(exponent)
-
-        # log-likelihood
-        return td_likelihood_prefactors + exponent
 
     def construct_proposed_cosmo(self, hyperparameters):
         """
@@ -287,14 +248,14 @@ class TDCLikelihood():
                                                      lambda_int_samples)
         # TODO test jitting this
         if USE_JAX:
-            td_log_likelihoods = self.jax_td_log_likelihood_per_samp(
+            td_log_likelihoods = jax_utils.jax_td_log_likelihood_per_samp(
                 jnp.asarray(td_pred_samples), jnp.asarray(data_vector_global[index_likelihood_list]['td_measured']),
                 jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prec']),
                 jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prefactors']))
             td_log_likelihoods = np.asarray(td_log_likelihoods)
         else:
             td_log_likelihoods = self.td_log_likelihood_per_samp(
-                td_pred_samples
+                td_pred_samples, index_likelihood_list
             )
 
         # reweighting factor
@@ -482,35 +443,7 @@ class TDCKinLikelihood(TDCLikelihood):
 
         # log-likelihood
         return data_vector_global[index_likelihood_list]['sigma_v_likelihood_prefactors'] + exponent
-
-    @staticmethod
-    @jax.jit
-    def jax_sigma_v_log_likelihood_per_samp(sigma_v_pred_samples ,sigma_v_measured,
-                                            sigma_v_likelihood_prec ,sigma_v_likelihood_prefactors):
-        """
-        Args:
-            sigma_v_pred_samples (n_lenses,n_fpd_samps,num_kinbins)
-            sigma_v_measured (n_lenses,n_fpd_samps,num_kinbins)
-            sigma_v_likelihood_prec (n_lenses,n_fpd_samps,n_kinbins,n_kinbins)
-            sigma_v_likelihood_prefactor (n_lenses,n_fpd_samps)
-
-        Returns:
-            sigma_v_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
-        """
-
-        x_minus_mu = (sigma_v_pred_samples -sigma_v_measured)
-        # add dimension s.t. x_minus_mu is 2D
-        x_minus_mu = jnp.expand_dims(x_minus_mu ,axis=-1)
-        # matmul should condense the (# of time delays) dim.
-        exponent = -0.5 *jnp.matmul(jnp.transpose(x_minus_mu ,axes=(0 ,1 ,3 ,2)),
-                                   jnp.matmul(sigma_v_likelihood_prec ,x_minus_mu))
-
-        # reduce to two dimensions: (n_lenses,n_fpd_samples)
-        exponent = jnp.squeeze(exponent)
-
-        # log-likelihood
-        return sigma_v_likelihood_prefactors + exponent
-
+    
 
     def full_log_likelihood(self, hyperparameters, index_likelihood_list):
 
@@ -522,10 +455,15 @@ class TDCKinLikelihood(TDCLikelihood):
         td_pred_samples = self.td_pred_from_fpd_pred(
             proposed_cosmo, index_likelihood_list, lambda_int_samples)
         # TODO: test jitting this
-        td_log_likelihoods = self.jax_td_log_likelihood_per_samp(
-            jnp.asarray(td_pred_samples) ,jnp.asarray(data_vector_global[index_likelihood_list]['td_measured']),
-            jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prec']),
-            jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prefactors']))
+        if USE_JAX:
+            td_log_likelihoods = jax_utils.jax_td_log_likelihood_per_samp(
+                jnp.asarray(td_pred_samples) ,jnp.asarray(data_vector_global[index_likelihood_list]['td_measured']),
+                jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prec']),
+                jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prefactors']))
+        else:
+            td_log_likelihoods = self.td_log_likelihood_per_samp(
+                td_pred_samples, index_likelihood_list
+            )
         td_log_likelihoods = np.asarray(td_log_likelihoods)
 
         # kin log likelihood per sample
@@ -533,7 +471,7 @@ class TDCKinLikelihood(TDCLikelihood):
             proposed_cosmo, index_likelihood_list, lambda_int_samples)
         # TODO: test jitting this
         if USE_JAX:
-            sigma_v_log_likelihoods = self.jax_sigma_v_log_likelihood_per_samp(
+            sigma_v_log_likelihoods = jax_utils.jax_sigma_v_log_likelihood_per_samp(
                 jnp.asarray(sigma_v_pred_samples),
                 jnp.asarray(data_vector_global[index_likelihood_list]['sigma_v_measured']),
                 jnp.asarray(data_vector_global[index_likelihood_list]['sigma_v_likelihood_prec']),
@@ -562,7 +500,7 @@ class TDCKinLikelihood(TDCLikelihood):
         # TODO: testing some jitting here (jit doesn't like the ==0 statement)
 
         if USE_JAX:
-            individ_likelihood = jax_fpd_samp_summation(jnp.asarray(
+            individ_likelihood = jax_utils.jax_fpd_samp_summation(jnp.asarray(
                 td_log_likelihoods +sigma_v_log_likelihoods +rw_factor))
             individ_likelihood = np.asarray(individ_likelihood)
 
@@ -578,7 +516,7 @@ class TDCKinLikelihood(TDCLikelihood):
             log_likelihood = -jnp.inf
 
         if USE_JAX:
-            log_likelihood = jax_lenses_summation(jnp.asarray(individ_likelihood))
+            log_likelihood = jax_utils.jax_lenses_summation(jnp.asarray(individ_likelihood))
         else:
             log_likelihood = np.sum(np.log(individ_likelihood))
 

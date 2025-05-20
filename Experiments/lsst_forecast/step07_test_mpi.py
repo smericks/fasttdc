@@ -15,13 +15,13 @@ import argparse
 
 parser = argparse.ArgumentParser(description="Run model with specific configurations.")
 parser.add_argument("--use-MPI", action="store_true", help="Use MPI for parallel processing.")
-parser.add_argument("--use-multiprocess", action="store_true", help="Use MPI for parallel processing.")
+parser.add_argument("--use-multiprocess", action="store_true", help="Use multiprocess for parallel processing.")
 args = parser.parse_args()
 use_MPI = args.use_MPI
 use_multiprocess = args.use_multiprocess
 
 # USER SETTINGS HERE (TODO: change filepaths)
-static_dv_filepath = 'DataVectors/gold/mpi_test.json'
+static_dv_filepath = 'DataVectors/gold/mpi_test.json' # TODO: how did I make this?
 np.random.seed(123)
 print(np.random.uniform(0,1))
 
@@ -89,7 +89,6 @@ quad_kin_lklhd_kappa_ext = tdc_sampler.TDCKinLikelihood(
     fpd_sample_shape, kin_pred_samples_shape,
     cosmo_model='LCDM_lambda_int_beta_ani',
     use_astropy=USE_ASTROPY)
-
 
 start = time.time()
 tenIFU_chain = tdc_sampler.fast_TDC([quad_kin_lklhd_kappa_ext],data_vector_dict_list, NUM_EMCEE_SAMPS,
