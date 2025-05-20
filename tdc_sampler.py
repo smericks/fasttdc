@@ -865,9 +865,9 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     hyperparameters_init = [6.47242793e+01, 2.33623746e-01, 9.14884078e-01, 1.34268817e-01,
                             -3.15238075e-02, 8.41097628e-02, 2.22904902e+00, 8.78549539e-03]
     print('hyperparameters_init', hyperparameters_init)
-    log_posterior(hyperparameters_init, 'LCDM_lambda_int_beta_ani',
+    log_post_val = log_posterior(hyperparameters_init, cosmo_model,
                   tdc_likelihood_list)
-    print('log_posterior', log_posterior(hyperparameters_init, cosmo_model, tdc_likelihood_list))
+    print('log_posterior', log_post_val)
     print('expected : log_posterior -1309.0113851331898')
 
     # emcee stuff here

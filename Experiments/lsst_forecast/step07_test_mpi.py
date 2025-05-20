@@ -4,9 +4,11 @@ import json
 import h5py
 import numpy as np
 import pandas as pd
+from importlib import import_module
 from scipy.stats import norm, multivariate_normal
 
 dirname = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(dirname, 'InferenceRuns'))
 sys.path.insert(0, os.path.join(dirname, '../..'))
 from Experiments.lsst_forecast.DataVectors.prep_data_vectors import create_static_data_vectors
 import tdc_sampler
@@ -21,51 +23,46 @@ use_MPI = args.use_MPI
 use_multiprocess = args.use_multiprocess
 
 # USER SETTINGS HERE (TODO: change filepaths)
-static_dv_filepath = 'DataVectors/gold/mpi_test.json' # TODO: how did I make this?
-np.random.seed(123)
+CONFIG_FILE = 'exp1_1_config'
+np.random.seed(123) # TODO: should this be in the experiment config?
 print(np.random.uniform(0,1))
 
-data_vectors = {
-    'gold_quads':{
-        'h5_file':'DataVectors/gold/quad_posteriors_KIN.h5',
-        'metadata_file':'DataVectors/gold/truth_metadata.csv',
-        'td_measurement_error_days':5.,
-        'sigma_v_measurement_error_kmpersec':5.
-    }
-}
 NUM_EMCEE_SAMPS = 10
 USE_ASTROPY = True #use this flag to avoid jax_cosmo DDts 
 
-# retrieve usable catalog idxs
-with h5py.File('DataVectors/gold/quad_posteriors_KIN.h5','r') as h5:
-    quad_catalog_idxs = h5['catalog_idxs'][:]
+# TODO: switch to feeding in a config file
+config_module = import_module(CONFIG_FILE)
 
-# create static data vectors 
-data_vector_dict = create_static_data_vectors(
-    posteriors_h5_file='DataVectors/gold/quad_posteriors_KIN.h5',
-    metadata_file='DataVectors/gold/truth_metadata.csv',
-    catalog_idxs=quad_catalog_idxs[:10],
-    cosmo_model='LCDM_lambda_int_beta_ani',
-    td_meas_error_days=5.,
-    kappa_ext_meas_error_value=0.05,
-    kinematic_type='NIRSPEC',
-    kin_meas_error_kmpersec=5.,
-    num_gaussianized_samps=5000,
-    log_prob_gamma_nu_int=norm(loc=2.,scale=0.2).logpdf,
-    log_prob_beta_ani_nu_int=norm(loc=0.,scale=0.2).logpdf
-)
+static_dv_filepath = config_module.static_dv_file #TODO, is .json
 
-# TODO: try switching it to a list
-for key in data_vector_dict.keys():
-    data_vector_dict[key] = data_vector_dict[key].tolist()
+likelihood_configs = config_module.likelihood_configs
 
-# Check if the file already exists
+# Check if static data vectors already exist
 if os.path.exists(static_dv_filepath):
-    print(f"File {static_dv_filepath} already exists.")
+    print(f"File {static_dv_filepath} already exists. Using existing file.")
+
 else:
+    print(f"Writing new static data vectors file: {static_dv_filepath}")
+
+    # loop thru each subsample and create static data vectors
+    data_vector_dict_list = []
+    for subsamp in likelihood_configs.keys():
+        #print('Processing ', subsamp)
+        input_dict = likelihood_configs[subsamp]
+
+        # TODO: replace args with **input_dict (check all params are there)
+        data_vector_dict = create_static_data_vectors(**input_dict)
+
+        # switch numpy arrays to lists for writing to .json
+        for key in data_vector_dict.keys():
+            data_vector_dict[key] = data_vector_dict[key].tolist()
+
+        # append to list (one for each likelihood object)
+        data_vector_dict_list.append(data_vector_dict)
+
     # Write list of static data vectors to a JSON file
     with open(static_dv_filepath, 'w') as file:
-        json.dump([data_vector_dict], file, indent=4)
+        json.dump(data_vector_dict_list, file, indent=4)
 
 ###################
 # RUN MCMC HERE!!!
@@ -80,18 +77,30 @@ for dv_dict in data_vector_dict_list:
     for key in dv_dict.keys():
         dv_dict[key] = np.asarray(dv_dict[key])
 
+# TODO: change how likelihood objects are created...
+likelihood_obj_list = []
+for sidx,subsamp in enumerate(likelihood_configs.keys()):
+    #print('Processing ', subsamp)
+    input_dict = likelihood_configs[subsamp]
+    fpd_sample_shape = data_vector_dict_list[sidx]['fpd_samples'].shape
+    if input_dict['kinematic_type'] is not None:
+        kin_pred_samples_shape = data_vector_dict_list[sidx]['kin_pred_samples'].shape
+        lklhd_obj = tdc_sampler.TDCKinLikelihood(
+            fpd_sample_shape, kin_pred_samples_shape,
+            cosmo_model='LCDM_lambda_int_beta_ani',
+            use_astropy=USE_ASTROPY)
+    else:
+        lklhd_obj = tdc_sampler.TDCLikelihood(fpd_sample_shape,
+            cosmo_model='LCDM_lambda_int_beta_ani',
+            use_astropy=USE_ASTROPY)
+        
+    likelihood_obj_list.append(lklhd_obj)
 
 # tdc_sampler likelihood object
-fpd_sample_shape = data_vector_dict_list[0]['fpd_samples'].shape
-kin_pred_samples_shape = data_vector_dict_list[0]['kin_pred_samples'].shape
-
-quad_kin_lklhd_kappa_ext = tdc_sampler.TDCKinLikelihood(
-    fpd_sample_shape, kin_pred_samples_shape,
-    cosmo_model='LCDM_lambda_int_beta_ani',
-    use_astropy=USE_ASTROPY)
 
 start = time.time()
-tenIFU_chain = tdc_sampler.fast_TDC([quad_kin_lklhd_kappa_ext],data_vector_dict_list, NUM_EMCEE_SAMPS,
+# TODO: debugging lklhd obj 3
+tenIFU_chain = tdc_sampler.fast_TDC(likelihood_obj_list[2:4],data_vector_dict_list[2:4], NUM_EMCEE_SAMPS,
     n_walkers=20, use_mpi=use_MPI, use_multiprocess=use_multiprocess)
 end = time.time()
 print('Time to run MCMC:',end-start)
