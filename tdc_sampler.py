@@ -868,7 +868,6 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     log_post_val = log_posterior(hyperparameters_init, cosmo_model,
                   tdc_likelihood_list)
     print('log_posterior', log_post_val)
-    print('expected : log_posterior -1309.0113851331898')
 
     # emcee stuff here
     if not use_mpi:
@@ -909,6 +908,15 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
             if not pool.is_master():
                 pool.wait()
                 sys.exit(0)
+
+            # should be safe to put backend here? since only master is running this line?
+            backend = None
+            if backend_path is not None:
+                backend = emcee.backends.HDFBackend(backend_path)
+            # if False, will pick-up where chain left off
+            if reset_backend:
+                backend.reset(n_walkers,cur_state.shape[1])
+
             sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn, pool=pool)
             # run mcmc
             tik_mcmc = time.time()

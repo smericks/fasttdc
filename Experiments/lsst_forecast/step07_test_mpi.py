@@ -100,7 +100,11 @@ for sidx,subsamp in enumerate(likelihood_configs.keys()):
 
 start = time.time()
 # TODO: debugging lklhd obj 3
-tenIFU_chain = tdc_sampler.fast_TDC(likelihood_obj_list[2:4],data_vector_dict_list[2:4], NUM_EMCEE_SAMPS,
-    n_walkers=20, use_mpi=use_MPI, use_multiprocess=use_multiprocess)
+tenIFU_chain = tdc_sampler.fast_TDC(likelihood_obj_list,data_vector_dict_list, 
+    num_emcee_samps=config_module.NUM_MCMC_EPOCHS,
+    n_walkers=config_module.NUM_MCMC_WALKERS, 
+    use_mpi=use_MPI, use_multiprocess=use_multiprocess,
+    backend_path=config_module.BACKEND_PATH,
+    reset_backend=config_module.RESET_BACKEND)
 end = time.time()
 print('Time to run MCMC:',end-start)
