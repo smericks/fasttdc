@@ -249,7 +249,7 @@ def create_static_data_vectors(
     data_vector_dict ={}
 
     # catalog idxs
-    data_vector_dict['catalog_idxs'] = catalog_idxs
+    data_vector_dict['catalog_idxs'] = np.asarray(catalog_idxs)
 
     # redshifts
     data_vector_dict['z_lens'] = metadata_df.loc[:,'main_deflector_parameters_z_lens'].to_numpy()
