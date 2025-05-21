@@ -2,6 +2,7 @@
 
 import h5py
 from scipy.stats import norm
+import numpy as np
 
 # file locations
 static_dv_file = 'InferenceRuns/exp1_1/static_datavectors.json'
@@ -23,6 +24,10 @@ with h5py.File(gold_quads_h5_file,'r') as h5:
     quad_catalog_idxs = h5['catalog_idxs'][:]
 with h5py.File(gold_dbls_h5_file,'r') as h5:
     dbl_catalog_idxs = h5['catalog_idxs'][:]
+
+# NOTE: remove bad indices (nans in doubles silver-quality kinematic samples)
+bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669]
+dbl_catalog_idxs = dbl_catalog_idxs[~np.isin(dbl_catalog_idxs, bad_dbls)]
 
 likelihood_configs = {
 

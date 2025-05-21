@@ -24,14 +24,13 @@ BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
 BACKEND_PATH = 'InferenceRuns/exp0_2/lcdm_backend.h5'
 RESET_BACKEND=True
 
-# catalog indices available
-with h5py.File(gold_quads_h5_file,'r') as h5:
-    quad_catalog_idxs = h5['catalog_idxs'][:]
-with h5py.File(gold_dbls_h5_file,'r') as h5:
-    dbl_catalog_idxs = h5['catalog_idxs'][:]
-
 # truth information for those indices
 truth_df = pd.read_csv(gold_metadata_file)
+# NOTE: subset to remove bad indices (nans in the doubles silver-quality kinematic samples)
+# remove rows from dataframe that have 'catalog_idx' in bad_dbls
+bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669]
+truth_df = truth_df[~truth_df['catalog_idx'].isin(bad_dbls)].reset_index(drop=True)
+# track catalog_idxs
 truth_df_catalog_idxs = truth_df.loc[:,'catalog_idx'].to_numpy()
 
 ##############################
@@ -279,7 +278,7 @@ likelihood_configs = {
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
-    'silver_4MOST_dbls':{
+    'silver_nokin_dbls':{
         'posteriors_h5_file':silver_dbls_h5_file,
         'metadata_file':silver_metadata_file,
         'catalog_idxs':truth_df_catalog_idxs[silver_dbls_idxs],
