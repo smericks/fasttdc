@@ -33,7 +33,6 @@ bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669]
 dbl_catalog_idxs = dbl_catalog_idxs[~np.isin(dbl_catalog_idxs, bad_dbls)]
 
 likelihood_configs = {
-    """
 
     # NIRSPEC likelihoods (10 lenses: 1 quad, 9 doubles)
     'nirspec_quads':{
@@ -153,7 +152,6 @@ likelihood_configs = {
         'log_prob_gamma_nu_int':GAMMA_LENS_PRIOR,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
-    """
 
     'silver_4MOST_dbls':{
         'posteriors_h5_file':silver_dbls_h5_file,
