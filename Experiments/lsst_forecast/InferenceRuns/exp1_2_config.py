@@ -12,12 +12,13 @@ gold_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_KIN.h5'
 gold_metadata_file = 'DataVectors/gold/truth_metadata.csv'
 
 NUM_FPD_SAMPS = 5000
-NUM_MCMC_EPOCHS = 100
+NUM_MCMC_EPOCHS = 2
 NUM_MCMC_WALKERS = 48
-COSMO_MODEL = 'LCDM_lambda_int_beta_ani'
+RANDOM_SEED = 123
+COSMO_MODEL = 'w0waCDM_lambda_int_beta_ani'
 GAMMA_LENS_PRIOR = norm(loc=2.,scale=0.2).logpdf
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
-BACKEND_PATH = 'InferenceRuns/exp1_2/baseline_backend.h5'
+BACKEND_PATH = 'InferenceRuns/exp1_2/w0wa_backend.h5'
 RESET_BACKEND=True
 
 # catalog indices available

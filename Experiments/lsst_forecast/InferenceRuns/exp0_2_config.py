@@ -16,8 +16,9 @@ silver_metadata_file = 'DataVectors/silver/truth_metadata.csv'
 
 
 NUM_FPD_SAMPS = 5000
-NUM_MCMC_EPOCHS = 100
+NUM_MCMC_EPOCHS = 2
 NUM_MCMC_WALKERS = 48
+RANDOM_SEED = 123
 COSMO_MODEL = 'LCDM_lambda_int_beta_ani'
 GAMMA_LENS_PRIOR = norm(loc=2.,scale=0.2).logpdf
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
