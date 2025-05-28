@@ -862,7 +862,11 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     cur_state = generate_initial_state(n_walkers,cosmo_model)
 
     print('Initial likelihood call : ')
-    hyperparameters_init = [6.47242793e+01, 2.33623746e-01, 9.14884078e-01, 1.34268817e-01,
+    if cosmo_model == 'LCDM_lambda_int_beta_ani':
+        hyperparameters_init = [6.47242793e+01, 2.33623746e-01, 9.14884078e-01, 1.34268817e-01,
+                            -3.15238075e-02, 8.41097628e-02, 2.22904902e+00, 8.78549539e-03]
+    elif cosmo_model == 'w0waCDM_lambda_int_beta_ani':
+        hyperparameters_init = [6.47242793e+01, 2.33623746e-01, -1., 0., 9.14884078e-01, 1.34268817e-01,
                             -3.15238075e-02, 8.41097628e-02, 2.22904902e+00, 8.78549539e-03]
     print('hyperparameters_init', hyperparameters_init)
     log_post_val = log_posterior(hyperparameters_init, cosmo_model,
@@ -913,14 +917,23 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
             backend = None
             if backend_path is not None:
                 backend = emcee.backends.HDFBackend(backend_path)
-            # if False, will pick-up where chain left off
-            if reset_backend:
-                backend.reset(n_walkers,cur_state.shape[1])
+                # if False, will pick-up where chain left off
+                if reset_backend:
+                    backend.reset(n_walkers,cur_state.shape[1])
+                #else:
+                #    last_pos = backend.get_last_sample()#.coords
+                #    cur_state = last_pos
 
-            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn, pool=pool)
+            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
+                log_posterior_fn, pool=pool, backend=backend)
+            
             # run mcmc
             tik_mcmc = time.time()
-            _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
+            if not reset_backend and backend is not None:
+                # init_state=None will have it pick-up where it left off?
+                _ = sampler.run_mcmc(None,nsteps=num_emcee_samps,progress=False)
+            else:
+                _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
             tok_mcmc = time.time()
             print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
         
