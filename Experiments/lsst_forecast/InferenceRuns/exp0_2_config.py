@@ -23,7 +23,7 @@ NUM_MCMC_WALKERS = 48
 COSMO_MODEL = 'LCDM_lambda_int_beta_ani'
 GAMMA_LENS_PRIOR = norm(loc=2.,scale=0.2).logpdf
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
-BACKEND_PATH = 'InferenceRuns/exp0_2/lcdm_backend_seed'+str(RANDOM_SEED)+'.h5'
+BACKEND_PATH = 'InferenceRuns/exp0_2/lcdm_seed'+str(RANDOM_SEED)+'_backend.h5'
 RESET_BACKEND=True
 
 # truth information for those indices

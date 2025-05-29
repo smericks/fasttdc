@@ -5,8 +5,11 @@ import pandas as pd
 import numpy as np
 from scipy.stats import norm
 
+# random seed
+RANDOM_SEED = 123
+
 # file locations
-static_dv_file = 'InferenceRuns/exp5_1/static_datavectors.json'
+static_dv_file = 'InferenceRuns/exp5_1/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
 gold_quads_h5_file = 'DataVectors/gold/quad_posteriors_KIN.h5'
 gold_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_KIN.h5'
 gold_metadata_file = 'DataVectors/gold/truth_metadata.csv'
@@ -14,11 +17,10 @@ gold_metadata_file = 'DataVectors/gold/truth_metadata.csv'
 NUM_FPD_SAMPS = 5000
 NUM_MCMC_EPOCHS = 2
 NUM_MCMC_WALKERS = 48
-RANDOM_SEED = 123
 COSMO_MODEL = 'LCDM_lambda_int_beta_ani'
 GAMMA_LENS_PRIOR = norm(loc=2.,scale=0.2).logpdf
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
-BACKEND_PATH = 'InferenceRuns/exp5_1/lcdm_backend.h5'
+BACKEND_PATH = 'InferenceRuns/exp5_1/lcdm_seed'+str(RANDOM_SEED)+'_backend.h5'
 RESET_BACKEND=True
 
 # catalog indices available
@@ -32,74 +34,100 @@ truth_df = pd.read_csv(gold_metadata_file)
 # NOTE: subset to remove bad indices (nans in the doubles silver-quality kinematic samples)
 # remove rows from dataframe that have 'catalog_idx' in bad_dbls
 bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669]
-truth_df = truth_df[~truth_df['catalog_idx'].isin(bad_dbls)].reset_index(drop=True)
+gold_df = truth_df[~truth_df['catalog_idx'].isin(bad_dbls)].reset_index(drop=True)
 # track catalog_idxs
-truth_df_catalog_idxs = truth_df.loc[:,'catalog_idx'].to_numpy()
+gold_df_catalog_idxs = gold_df.loc[:,'catalog_idx'].to_numpy()
 
-##############################
+#########################
 # Human selection cuts!!
-##############################
+#########################
+
+# GOLD NIRSPEC
+num_quads = 10
 nirspec_quads_avail = np.where(
-    (truth_df['point_source_parameters_num_images'].to_numpy() == 4) &
-    ((np.abs(truth_df['td01'].to_numpy()) > 30.) | 
-     (np.abs(truth_df['td02'].to_numpy()) > 30.) | 
-     (np.abs(truth_df['td03'].to_numpy()) > 30.)) &
+    (gold_df['point_source_parameters_num_images'].to_numpy() == 4) &
+    ((np.abs(gold_df['td01'].to_numpy()) > 30.) | 
+     (np.abs(gold_df['td02'].to_numpy()) > 30.) | 
+     (np.abs(gold_df['td03'].to_numpy()) > 30.)) &
     #(truth_df['lens_light_parameters_mag_app'].to_numpy() > 22.) &
-    (truth_df['lens_light_parameters_mag_app'].to_numpy() < 24.) &
-    (truth_df['source_parameters_mag_app'].to_numpy() < 24.)
+    (gold_df['lens_light_parameters_mag_app'].to_numpy() < 24.) &
+    (gold_df['source_parameters_mag_app'].to_numpy() < 24.)
 )[0]
+# take the catalog idxs you want
+catalog_idx_avail = gold_df.loc[nirspec_quads_avail,'catalog_idx'].to_numpy()
+nirspec_quads_catalog_idxs = np.random.choice(catalog_idx_avail,
+    size=num_quads,replace=False)
+# then remove them from the dataframe
+gold_df = gold_df[~gold_df['catalog_idx'].isin(nirspec_quads_catalog_idxs)].reset_index(drop=True)
 
-print('%d NIRSPEC lenses available'%(len(nirspec_quads_avail)))
-print('Choosing 10...')
-nirspec_quads_idxs = nirspec_quads_avail[:10]
-quads_taken = nirspec_quads_idxs
+# GOLD MUSE
 
-# available for MUSE (most stringent cut)
+# available for MUSE quads (most stringent cut)
+num_total = 40
+num_quads = 20
 muse_quads_avail = np.where(
-    (truth_df['point_source_parameters_num_images'].to_numpy() == 4) &
-    ((np.abs(truth_df['td01'].to_numpy()) > 30.) | 
-     (np.abs(truth_df['td02'].to_numpy()) > 30.) | 
-     (np.abs(truth_df['td03'].to_numpy()) > 30.)) &
-    (truth_df['lens_light_parameters_mag_app'].to_numpy() < 22.) &
-    (truth_df['source_parameters_mag_app'].to_numpy() < 24.)
+    (gold_df['point_source_parameters_num_images'].to_numpy() == 4) &
+    ((np.abs(gold_df['td01'].to_numpy()) > 30.) | 
+     (np.abs(gold_df['td02'].to_numpy()) > 30.) | 
+     (np.abs(gold_df['td03'].to_numpy()) > 30.)) &
+    (gold_df['lens_light_parameters_mag_app'].to_numpy() < 22.) &
+    (gold_df['source_parameters_mag_app'].to_numpy() < 24.)
 )[0]
-# remove the ones already chosen for nirspec
-muse_quads_avail = np.setdiff1d(muse_quads_avail, quads_taken)
+# if not enough quads, include more doubles
+if len(muse_quads_avail)<num_quads:
+    num_quads = len(muse_quads_avail)
+num_dbls = num_total - num_quads
+# pick the quad idxs...
+# take the catalog idxs you want
+catalog_idx_avail = gold_df.loc[muse_quads_avail,'catalog_idx'].to_numpy()
+muse_quads_catalog_idxs = np.random.choice(catalog_idx_avail,
+    size=num_quads,replace=False)
+# then remove them from the dataframe
+gold_df = gold_df[~gold_df['catalog_idx'].isin(muse_quads_catalog_idxs)].reset_index(drop=True)
 
-print('%d MUSE quad lenses available'%(len(muse_quads_avail)))
-print('Choosing 19...')
-muse_quads_idxs = muse_quads_avail
-quads_taken = np.concatenate((quads_taken,muse_quads_idxs))
 
 muse_dbls_avail = np.where(
-    (truth_df['point_source_parameters_num_images'].to_numpy() == 2) &
-    ((np.abs(truth_df['td01'].to_numpy()) > 30.) | 
-     (np.abs(truth_df['td02'].to_numpy()) > 30.) | 
-     (np.abs(truth_df['td03'].to_numpy()) > 30.)) &
-    (truth_df['lens_light_parameters_mag_app'].to_numpy() < 22.) &
-    (truth_df['source_parameters_mag_app'].to_numpy() < 24.)
+    (gold_df['point_source_parameters_num_images'].to_numpy() == 2) &
+    ((np.abs(gold_df['td01'].to_numpy()) > 30.) | 
+     (np.abs(gold_df['td02'].to_numpy()) > 30.) | 
+     (np.abs(gold_df['td03'].to_numpy()) > 30.)) &
+    (gold_df['lens_light_parameters_mag_app'].to_numpy() < 22.) &
+    (gold_df['source_parameters_mag_app'].to_numpy() < 24.)
 )[0]
 
-print('%d MUSE double lenses available'%(len(muse_dbls_avail)))
-print('Choosing 21...')
-muse_dbls_idxs = muse_dbls_avail[:21]
-dbls_taken = muse_dbls_idxs
+# take the catalog idxs you want
+catalog_idx_avail = gold_df.loc[muse_dbls_avail,'catalog_idx'].to_numpy()
+muse_dbls_catalog_idxs = np.random.choice(catalog_idx_avail,
+    size=num_dbls,replace=False)
+# then remove them from the dataframe
+gold_df = gold_df[~gold_df['catalog_idx'].isin(muse_dbls_catalog_idxs)].reset_index(drop=True)
 
+
+# GOLD 4MOST
+num_quads = 75
+num_total = 150
 fourmost_quads_avail = np.where(
-    (truth_df['point_source_parameters_num_images'].to_numpy() == 4))[0]
-fourmost_quads_avail = np.setdiff1d(fourmost_quads_avail,quads_taken)
-print('%d 4MOST quad lenses available'%(len(fourmost_quads_avail)))
-print('Choosing 75')
-fourmost_quads_idxs = fourmost_quads_avail[:75]
-quads_taken = np.concatenate((quads_taken,fourmost_quads_idxs))
+    (gold_df['point_source_parameters_num_images'].to_numpy() == 4))[0]
+# if not enough quads, include more doubles
+if len(fourmost_quads_avail)<num_quads:
+    num_quads = len(fourmost_quads_avail)
+num_dbls = num_total - num_quads
+# take the catalog idxs you want
+catalog_idx_avail = gold_df.loc[fourmost_quads_avail,'catalog_idx'].to_numpy()
+fourmost_quads_catalog_idxs = np.random.choice(catalog_idx_avail,
+    size=num_quads,replace=False)
+# then remove them from the dataframe
+gold_df = gold_df[~gold_df['catalog_idx'].isin(fourmost_quads_catalog_idxs)].reset_index(drop=True)
 
+# doubles
 fourmost_dbls_avail = np.where(
-    (truth_df['point_source_parameters_num_images'].to_numpy() == 2))[0]
-fourmost_dbls_avail = np.setdiff1d(fourmost_dbls_avail,dbls_taken)
-print('%d 4MOST double lenses available'%(len(fourmost_dbls_avail)))
-print('Choosing 75')
-fourmost_dbls_idxs = fourmost_dbls_avail[:75]
-dbls_taken = np.concatenate((dbls_taken,fourmost_dbls_idxs))
+    (gold_df['point_source_parameters_num_images'].to_numpy() == 2))[0]
+# take the catalog idxs you want
+catalog_idx_avail = gold_df.loc[fourmost_dbls_avail,'catalog_idx'].to_numpy()
+fourmost_dbls_catalog_idxs = np.random.choice(catalog_idx_avail,
+    size=num_dbls,replace=False)
+# then remove them from the dataframe
+gold_df = gold_df[~gold_df['catalog_idx'].isin(fourmost_dbls_catalog_idxs)].reset_index(drop=True)
 
 
 ##############################
@@ -111,7 +139,7 @@ likelihood_configs = {
     'nirspec_quads':{
         'posteriors_h5_file':gold_quads_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':truth_df_catalog_idxs[nirspec_quads_idxs],
+        'catalog_idxs':nirspec_quads_avail,
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':0.03,
         'td_meas_error_days':None,
@@ -128,7 +156,7 @@ likelihood_configs = {
     'muse_quads':{
         'posteriors_h5_file':gold_quads_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':truth_df_catalog_idxs[muse_quads_idxs],
+        'catalog_idxs':muse_quads_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':0.03,
         'td_meas_error_days':None,
@@ -144,7 +172,7 @@ likelihood_configs = {
     'muse_dbls':{
         'posteriors_h5_file':gold_dbls_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':truth_df_catalog_idxs[muse_dbls_idxs],
+        'catalog_idxs':muse_dbls_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':0.03,
         'td_meas_error_days':None,
@@ -163,7 +191,7 @@ likelihood_configs = {
     '4MOST_quads':{
         'posteriors_h5_file':gold_quads_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':truth_df_catalog_idxs[fourmost_quads_idxs[:30]],
+        'catalog_idxs':fourmost_quads_catalog_idxs[:30],
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':None,
         'td_meas_error_days':2., #TODO: switch to histogram
@@ -179,7 +207,7 @@ likelihood_configs = {
     '4MOST_dbls':{
         'posteriors_h5_file':gold_dbls_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':truth_df_catalog_idxs[fourmost_dbls_idxs[:30]],
+        'catalog_idxs':fourmost_dbls_catalog_idxs[:30],
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':None,
         'td_meas_error_days':2., #TODO: switch to histogram
@@ -196,7 +224,7 @@ likelihood_configs = {
     '4MOST_quads':{
         'posteriors_h5_file':gold_quads_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':truth_df_catalog_idxs[fourmost_quads_idxs[30:]],
+        'catalog_idxs':fourmost_quads_catalog_idxs[30:],
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':None,
         'td_meas_error_days':5.,
@@ -212,7 +240,7 @@ likelihood_configs = {
     '4MOST_dbls':{
         'posteriors_h5_file':gold_dbls_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':truth_df_catalog_idxs[fourmost_dbls_idxs[30:]],
+        'catalog_idxs':fourmost_dbls_catalog_idxs[30:],
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':None,
         'td_meas_error_days':5.,
