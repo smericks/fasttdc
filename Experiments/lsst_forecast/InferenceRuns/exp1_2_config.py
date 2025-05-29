@@ -18,7 +18,9 @@ NUM_FPD_SAMPS = 5000
 NUM_MCMC_EPOCHS = 2
 NUM_MCMC_WALKERS = 48
 COSMO_MODEL = 'LCDM_lambda_int_beta_ani'
-GAMMA_LENS_PRIOR = norm(loc=2.,scale=0.2).logpdf
+# NOTE: use norms.csv to read off modeling prior for each model
+GOLD_GAMMA_LENS_PRIOR = norm(loc=2.09,scale=0.16).logpdf # hst_norms.csv: 2.0882867897222503,0.16008433847145742
+SILVER_GAMMA_LENS_PRIOR = norm(loc=2.03,scale=0.19).logpdf # norms2.csv: 2.033213914041585,0.1915982613222065
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
 BACKEND_PATH = 'InferenceRuns/exp1_2/lcdm_seed'+str(RANDOM_SEED)+'_backend.h5'
 RESET_BACKEND=True
@@ -148,7 +150,7 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GAMMA_LENS_PRIOR,
+        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -165,7 +167,7 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GAMMA_LENS_PRIOR,
+        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -181,7 +183,7 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GAMMA_LENS_PRIOR,
+        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -198,7 +200,7 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GAMMA_LENS_PRIOR,
+        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -214,7 +216,7 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GAMMA_LENS_PRIOR,
+        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 }
