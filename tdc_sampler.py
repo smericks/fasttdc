@@ -707,19 +707,20 @@ def generate_initial_state(n_walkers,cosmo_model):
         return cur_state
     
     if cosmo_model == 'w0waCDM_lambda_int_beta_ani':
+        # TODO: try this one with intializing with a compact ball!
         # order: [H0,Omega_M,w0,wa,mu_lambda_int,sigma_lambda_int,
         #   mu_beta_ani,sigma_beta_ani,mu_gamma,sigma_gamma]
         cur_state = np.empty((n_walkers,10))
-        cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
-        cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
-        cur_state[:,2] = uniform.rvs(loc=-1.5,scale=1.,size=n_walkers) #w0
-        cur_state[:,3] = uniform.rvs(loc=-1,scale=2,size=n_walkers) #wa
-        cur_state[:,4] = uniform.rvs(loc=0.9,scale=0.2,size=n_walkers)
-        cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.499,size=n_walkers)
-        cur_state[:,6] = uniform.rvs(loc=-0.1,scale=0.2,size=n_walkers)
-        cur_state[:,7] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
-        cur_state[:,8] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
-        cur_state[:,9] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+        cur_state[:,0] = norm.rvs(loc=70.,scale=5.,size=n_walkers) #h0
+        cur_state[:,1] = truncnorm.rvs(-.3/.1,.2/0.1,loc=0.3,scale=0.1,size=n_walkers) #Omega_M
+        cur_state[:,2] = truncnorm.rvs(-1/.2,1/.2,loc=-1.,scale=0.2,size=n_walkers) #w0
+        cur_state[:,3] = truncnorm.rvs(-1/.2,1/.2,loc=0.,scale=0.2,size=n_walkers) #wa
+        cur_state[:,4] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=1.,scale=0.1,size=n_walkers) # mu(lambda_int)
+        cur_state[:,5] = uniform.rvs(loc=0.01,scale=0.49,size=n_walkers)
+        cur_state[:,6] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=0.,scale=0.1,size=n_walkers) # mu(beta_ani)
+        cur_state[:,7] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+        cur_state[:,8] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=2.,scale=0.1,size=n_walkers) # mu(gamma_lens)
+        cur_state[:,9] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
 
         return cur_state
 

@@ -9,7 +9,7 @@ from scipy.stats import norm
 RANDOM_SEED = 1
 
 # file locations
-static_dv_file = 'InferenceRuns/exp0_2/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
+static_dv_file = 'InferenceRuns/exp0_2/TESTstatic_datavectors_seed'+str(RANDOM_SEED)+'.json'
 gold_quads_h5_file = 'DataVectors/gold/quad_posteriors_KIN.h5'
 gold_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_KIN.h5'
 gold_metadata_file = 'DataVectors/gold/truth_metadata.csv'
@@ -138,13 +138,17 @@ num_quads = 36
 num_total = 300
 silver_withkin_quads_avail = np.where(
     (silver_df['point_source_parameters_num_images'].to_numpy() == 4))[0]
+# if not enough quads, include more doubles
+if len(silver_withkin_quads_avail)<num_quads:
+    num_quads = len(fourmost_quads_avail)
+num_dbls = num_total - num_quads
 # take the catalog idxs you want
 catalog_idx_avail = silver_df.loc[silver_withkin_quads_avail,'catalog_idx'].to_numpy()
 silver_withkin_quads_catalog_idxs = np.random.choice(catalog_idx_avail,
     size=num_quads,replace=False)
 # then remove them from the dataframe
 silver_df = silver_df[~silver_df['catalog_idx'].isin(silver_withkin_quads_catalog_idxs)].reset_index(drop=True)
-
+# doubles
 silver_withkin_dbls_avail = np.where(
      (silver_df['point_source_parameters_num_images'].to_numpy() == 2))[0]
 # take the catalog idxs you want
@@ -164,11 +168,13 @@ if len(silver_quads_avail)<num_quads:
     num_quads = len(silver_quads_avail)
 num_dbls = num_total - num_quads
 # take the catalog idxs you want
-catalog_idx_avail = silver_df.loc[silver_quads_avail,'catalog_idx'].to_numpy()
-silver_quads_catalog_idxs = np.random.choice(catalog_idx_avail,
-    size=num_quads,replace=False)
-# then remove them from the dataframe
-silver_df = silver_df[~silver_df['catalog_idx'].isin(silver_quads_catalog_idxs)].reset_index(drop=True)
+silver_quads_catalog_idxs = None # edge case where no quads left...
+if num_quads > 0:
+    catalog_idx_avail = silver_df.loc[silver_quads_avail,'catalog_idx'].to_numpy()
+    silver_quads_catalog_idxs = np.random.choice(catalog_idx_avail,
+        size=num_quads,replace=False)
+    # then remove them from the dataframe
+    silver_df = silver_df[~silver_df['catalog_idx'].isin(silver_quads_catalog_idxs)].reset_index(drop=True)
 
 silver_dbls_avail = np.where(
     (silver_df['point_source_parameters_num_images'].to_numpy() == 2))[0]
@@ -308,22 +314,6 @@ likelihood_configs = {
 
 
     # Silver no kinematics (300 lenses)
-    'silver_nokin_quads':{
-        'posteriors_h5_file':silver_quads_h5_file,
-        'metadata_file':silver_metadata_file,
-        'catalog_idxs':silver_quads_catalog_idxs,
-        'cosmo_model':COSMO_MODEL,
-        'td_meas_error_percent':None,
-        'td_meas_error_days':5.,
-        'kappa_ext_meas_error_value':0.05,
-        'kinematic_type':None,
-        'kin_meas_error_percent':None,
-        'kin_meas_error_kmpersec':None,
-        'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':SILVER_GAMMA_LENS_PRIOR,
-        'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
-    },
-
     'silver_nokin_dbls':{
         'posteriors_h5_file':silver_dbls_h5_file,
         'metadata_file':silver_metadata_file,
@@ -340,3 +330,21 @@ likelihood_configs = {
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 }
+
+# handle edge case where no silver quads w/out kin
+if silver_quads_catalog_idxs is not None:
+    likelihood_configs['silver_nokin_quads'] = {
+        'posteriors_h5_file':silver_quads_h5_file,
+        'metadata_file':silver_metadata_file,
+        'catalog_idxs':silver_quads_catalog_idxs,
+        'cosmo_model':COSMO_MODEL,
+        'td_meas_error_percent':None,
+        'td_meas_error_days':5.,
+        'kappa_ext_meas_error_value':0.05,
+        'kinematic_type':None,
+        'kin_meas_error_percent':None,
+        'kin_meas_error_kmpersec':None,
+        'num_gaussianized_samps':NUM_FPD_SAMPS,
+        'log_prob_gamma_nu_int':SILVER_GAMMA_LENS_PRIOR,
+        'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
+    }
