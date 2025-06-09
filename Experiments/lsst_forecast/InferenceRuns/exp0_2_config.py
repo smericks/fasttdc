@@ -40,6 +40,9 @@ gold_df_catalog_idxs = gold_df.loc[:,'catalog_idx'].to_numpy()
 # Human selection cuts!!
 #########################
 
+# use the random seed
+np.random.seed(RANDOM_SEED)
+
 # GOLD NIRSPEC
 num_quads = 10
 nirspec_quads_avail = np.where(

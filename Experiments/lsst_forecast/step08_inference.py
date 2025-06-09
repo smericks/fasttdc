@@ -7,7 +7,6 @@ from importlib import import_module
 dirname = os.path.dirname(__file__)
 sys.path.insert(0, os.path.join(dirname, 'InferenceRuns'))
 sys.path.insert(0, os.path.join(dirname, '../..'))
-from Experiments.lsst_forecast.DataVectors.prep_data_vectors import create_static_data_vectors
 import tdc_sampler
 import time
 import argparse
@@ -31,34 +30,10 @@ USE_ASTROPY = True
 np.random.seed(config_module.RANDOM_SEED)
 
 static_dv_filepath = config_module.static_dv_file 
-likelihood_configs = config_module.likelihood_configs
 
 # Check if static data vectors already exist
-if os.path.exists(static_dv_filepath):
-    print(f"File {static_dv_filepath} already exists. Using existing file.")
-
-else:
-    print(f"Writing new static data vectors file: {static_dv_filepath}")
-
-    # loop thru each subsample and create static data vectors
-    data_vector_dict_list = []
-    for subsamp in likelihood_configs.keys():
-        #print('Processing ', subsamp)
-        input_dict = likelihood_configs[subsamp]
-
-        # TODO: replace args with **input_dict (check all params are there)
-        data_vector_dict = create_static_data_vectors(**input_dict)
-
-        # switch numpy arrays to lists for writing to .json
-        for key in data_vector_dict.keys():
-            data_vector_dict[key] = data_vector_dict[key].tolist()
-
-        # append to list (one for each likelihood object)
-        data_vector_dict_list.append(data_vector_dict)
-
-    # Write list of static data vectors to a JSON file
-    with open(static_dv_filepath, 'w') as file:
-        json.dump(data_vector_dict_list, file, indent=4)
+if not os.path.exists(static_dv_filepath):
+    print(f"File {static_dv_filepath} does not exist. Please use step08_datavectors.py to create it.")
 
 ###################
 # RUN MCMC HERE!!!
@@ -71,16 +46,16 @@ with open(static_dv_filepath, 'r') as file:
 # return it to np.array
 for dv_dict in data_vector_dict_list:
     for key in dv_dict.keys():
-        dv_dict[key] = np.asarray(dv_dict[key])
+        if isinstance(dv_dict[key], list):
+            dv_dict[key] = np.asarray(dv_dict[key])
 
-# TODO: change how likelihood objects are created...
 likelihood_obj_list = []
-for sidx,subsamp in enumerate(likelihood_configs.keys()):
+# TODO: need to handle edge case when re-sampling, and might be missing silver quads...
+for dv_dict in data_vector_dict_list:
     #print('Processing ', subsamp)
-    input_dict = likelihood_configs[subsamp]
-    fpd_sample_shape = data_vector_dict_list[sidx]['fpd_samples'].shape
-    if input_dict['kinematic_type'] is not None:
-        kin_pred_samples_shape = data_vector_dict_list[sidx]['kin_pred_samples'].shape
+    fpd_sample_shape = dv_dict['fpd_samples'].shape
+    if dv_dict['kinematic_type'] is not None:
+        kin_pred_samples_shape = dv_dict['kin_pred_samples'].shape
         lklhd_obj = tdc_sampler.TDCKinLikelihood(
             fpd_sample_shape, kin_pred_samples_shape,
             cosmo_model=config_module.COSMO_MODEL,
