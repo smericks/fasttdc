@@ -27,7 +27,7 @@ with h5py.File(gold_dbls_h5_file,'r') as h5:
     dbl_catalog_idxs = h5['catalog_idxs'][:]
 
 # NOTE: remove bad indices (nans in doubles silver-quality kinematic samples)
-bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669]
+bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669, 877, 1052]
 dbl_catalog_idxs = dbl_catalog_idxs[~np.isin(dbl_catalog_idxs, bad_dbls)]
 
 likelihood_configs = {

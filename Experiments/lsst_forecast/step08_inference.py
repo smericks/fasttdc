@@ -54,7 +54,7 @@ likelihood_obj_list = []
 for dv_dict in data_vector_dict_list:
     #print('Processing ', subsamp)
     fpd_sample_shape = dv_dict['fpd_samples'].shape
-    if dv_dict['kinematic_type'] is not None:
+    if 'kin_pred_samples' in dv_dict.keys():
         kin_pred_samples_shape = dv_dict['kin_pred_samples'].shape
         lklhd_obj = tdc_sampler.TDCKinLikelihood(
             fpd_sample_shape, kin_pred_samples_shape,

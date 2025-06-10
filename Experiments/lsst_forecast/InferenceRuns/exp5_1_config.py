@@ -34,7 +34,7 @@ with h5py.File(gold_dbls_h5_file,'r') as h5:
 truth_df = pd.read_csv(gold_metadata_file)
 # NOTE: subset to remove bad indices (nans in the doubles silver-quality kinematic samples)
 # remove rows from dataframe that have 'catalog_idx' in bad_dbls
-bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669]
+bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669, 877, 1052]
 gold_df = truth_df[~truth_df['catalog_idx'].isin(bad_dbls)].reset_index(drop=True)
 # track catalog_idxs
 gold_df_catalog_idxs = gold_df.loc[:,'catalog_idx'].to_numpy()
