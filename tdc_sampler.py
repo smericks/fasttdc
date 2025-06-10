@@ -1,21 +1,19 @@
-import jax_cosmo
-import jax.numpy as jnp
-import jax
-import numpy as np
-import pandas as pd
-from scipy.stats import norm, truncnorm, uniform, multivariate_normal
-from astropy.cosmology import w0waCDM
-import Utils.tdc_utils as tdc_utils
-import emcee
 import time
 import sys
 from functools import partial
-#from mpi4py import MPI
-import os
+import emcee
+import jax
+import jax.numpy as jnp
+import jax_cosmo
+import numpy as np
+from astropy.cosmology import w0waCDM
+from scipy.stats import norm, truncnorm, uniform
+import Utils.tdc_utils as tdc_utils
 
-# flag for whether to use jax or not
 USE_JAX = False
 
+if USE_JAX:
+    import tdc_jax_utils as jax_utils
 """
 cosmo_models available: 
     'LCDM': [H0,OmegaM,mu(gamma_lens),sigma(gamma_lens)]
@@ -32,27 +30,26 @@ cosmo_models available:
 
 # I think we want this to be a class, so we can keep track of quantities
 # internally 
+
+
 class TDCLikelihood():
 
-    def __init__(self,td_measured,td_likelihood_prec,
-        fpd_samples,gamma_pred_samples,z_lens,z_src,
-        kappa_ext_samples=None,
-        log_prob_gamma_nu_int=None,cosmo_model='LCDM',
-        use_gamma_info=True,use_astropy=False):
+    def __init__(self, fpd_sample_shape, cosmo_model='LCDM',
+                 use_gamma_info=True, use_astropy=False):
         """
         Keep track of quantities that remain constant throughout the inference
 
-        Args: 
+        Args:
             td_measured: array of td_measured
                 doubles: (n_lenses,1)
                 quads: (n_lenses,3)
-            td_likelihood_prec: array of precision matrices: 
+            td_likelihood_prec: array of precision matrices:
                 - doubles: ((1/sigma^2))
                 - quads: ((1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2))
             fpd_samples: array of fermat potential difference posterior samples
                 doubles: (n_lenses,n_fpd_samples,1)
                 quads: (n_lenses,n_fpd_samples,3)
-            gamma_pred_samples (np.array(float)): 
+            gamma_pred_samples (np.array(float)):
                 gamma samples associated with each set of fpd samples.
                 (n_lenses,n_fpd_samples)
             z_lens (np.array(float), size:(n_lenses)): lens redshifts
@@ -63,55 +60,28 @@ class TDCLikelihood():
                 for the modeling prior on gamma_lens (also called nu_int)
             cosmo_model (string): 'LCDM' or 'w0waCDM'
             use_gamma_info (bool): If False, removes reweighting from likelihood
-                evaluation (any population level gamma params should just 
+                evaluation (any population level gamma params should just
                 return the prior then...)
         """
 
         # no processing needed (np.squeeze ensures any dimensions of size 1
         #    are removed)
-        self.z_lens = np.squeeze(np.asarray(z_lens))
-        self.z_src = np.squeeze(np.asarray(z_src))
-        if cosmo_model not in ['LCDM','LCDM_lambda_int',
-            'LCDM_lambda_int_beta_ani','w0waCDM','w0waCDM_lambda_int_beta_ani']:
-            raise ValueError("choose from available cosmo_models: "+
-                "LCDM, LCDM_lambda_int, LCDM_lambda_int_beta_ani, w0waCDM, "+
-                "w0waCDM_lambda_int_beta_ani")
+        if cosmo_model not in ['LCDM', 'LCDM_lambda_int',
+                               'LCDM_lambda_int_beta_ani', 'w0waCDM', 'w0waCDM_lambda_int_beta_ani']:
+            raise ValueError("choose from available cosmo_models: " +
+                             "LCDM, LCDM_lambda_int, LCDM_lambda_int_beta_ani, w0waCDM, " +
+                             "w0waCDM_lambda_int_beta_ani")
         self.cosmo_model = cosmo_model
         self.use_gamma_info = use_gamma_info
         self.use_astropy = use_astropy
         # make sure the dims are right
-        self.num_lenses = fpd_samples.shape[0]
-        self.num_fpd_samples = fpd_samples.shape[1]
-        self.dim_fpd = fpd_samples.shape[2]
-        
-        # keep track internally
-        self.gamma_pred_samples = gamma_pred_samples
-        self.fpd_samples = fpd_samples
-        self.kappa_ext_samples = kappa_ext_samples
-
-        # pad with a 2nd batch dim for # of fpd samples
-        self.td_measured = np.repeat(td_measured[:, np.newaxis, :],
-            self.num_fpd_samples, axis=1)
-        self.td_likelihood_prec = np.repeat(td_likelihood_prec[:, np.newaxis, :, :],
-            self.num_fpd_samples, axis=1)
-        # TODO: compute likelihood prefactors here instead of feeding them in...
-        # log( (1/(2pi)^k/2) * 1/sqrt(det(Sigma)) )
-        k_dim = self.dim_fpd
-        self.td_likelihood_prefactors = np.log( (1/(2*np.pi)**(k_dim/2)) / 
-            np.sqrt(np.linalg.det(np.linalg.inv(self.td_likelihood_prec))) )
-
-        # TODO: fix hardcoding of this
-        if log_prob_gamma_nu_int is None:
-            self.log_prob_modeling_prior = uniform.logpdf(gamma_pred_samples,loc=1.,scale=2.)
-            #self.log_prob_modeling_prior = norm.logpdf(gamma_pred_samples,loc=2.,scale=0.2)
-        else:
-            self.log_prob_modeling_prior = np.empty((gamma_pred_samples.shape))
-            for i in range(0,gamma_pred_samples.shape[0]):
-                self.log_prob_modeling_prior[i,:] = log_prob_gamma_nu_int(gamma_pred_samples[i])
+        self.num_lenses, self.num_fpd_samples, self.dim_fpd = fpd_sample_shape
 
     # compute predicted time delays from predicted fermat potential differences
     # requires an assumed cosmology (from hyperparameters) and redshifts
-    def td_pred_from_fpd_pred(self,proposed_cosmo,lambda_int_samples=None):
+
+
+    def td_pred_from_fpd_pred(self, proposed_cosmo, index_likelihood_list, lambda_int_samples=None, ):
         """
         Args:
             proposed_cosmo (default: jax_cosmo.Cosmology): built by
@@ -124,38 +94,40 @@ class TDCLikelihood():
 
         if self.use_astropy:
             Ddt_computed = tdc_utils.ddt_from_redshifts(proposed_cosmo,
-                self.z_lens,self.z_src)
+                                                        data_vector_global[index_likelihood_list]['z_lens'],
+                                                        data_vector_global[index_likelihood_list]['z_src'])
         else:
             Ddt_computed = tdc_utils.jax_ddt_from_redshifts(proposed_cosmo,
-                self.z_lens,self.z_src)
-        
+                                                            data_vector_global[index_likelihood_list]['z_lens'],
+                                                            data_vector_global[index_likelihood_list]['z_src'])
+
         Ddt_computed = np.array(Ddt_computed)
         # add batch dimensions for Ddt computed...
         Ddt_repeated = np.repeat(Ddt_computed[:, np.newaxis],
-            self.num_fpd_samples, axis=1)
-        Ddt_repeated = np.repeat(Ddt_repeated[:,:, np.newaxis],
-            self.dim_fpd, axis=2)
+                                 self.num_fpd_samples, axis=1)
+        Ddt_repeated = np.repeat(Ddt_repeated[:, :, np.newaxis],
+                                 self.dim_fpd, axis=2)
         # compute predicted time delays (this function should work w/ arrays)
-        td_pred = tdc_utils.td_from_ddt_fpd(Ddt_repeated,self.fpd_samples)
-        
-        # Account for mass sheets: 
+        td_pred = tdc_utils.td_from_ddt_fpd(Ddt_repeated, data_vector_global[index_likelihood_list]['fpd_samples'])
+
+        # Account for mass sheets:
         #   td = lambda * td
         #   lambda = (1-kappa_ext)*lambda_int
 
         # Linear scaling if lambda_int is present
         if lambda_int_samples is not None:
-            lambda_int_repeated = np.repeat(lambda_int_samples[:,:,np.newaxis],
-                self.dim_fpd, axis=2)
+            lambda_int_repeated = np.repeat(lambda_int_samples[:, :, np.newaxis],
+                                            self.dim_fpd, axis=2)
             td_pred *= lambda_int_repeated
         # Scaling if kappa_ext is present...
-        if self.kappa_ext_samples is not None:
-            kappa_ext_repeated = np.repeat(self.kappa_ext_samples[:,:,np.newaxis],
-                self.dim_fpd, axis=2)
-            td_pred *= (1-kappa_ext_repeated)
+        if data_vector_global[index_likelihood_list]['kappa_ext_samples'] is not None:
+            kappa_ext_repeated = np.repeat(data_vector_global[index_likelihood_list]['kappa_ext_samples'][:, :, np.newaxis],
+                                           self.dim_fpd, axis=2)
+            td_pred *= (1 - kappa_ext_repeated)
 
         return td_pred
 
-    def td_log_likelihood_per_samp(self,td_pred_samples):
+    def td_log_likelihood_per_samp(self, td_pred_samples, index_likelihood_list):
         """
         Args:
             td_pred_samples (n_lenses,n_fpd_samps,3)
@@ -164,54 +136,24 @@ class TDCLikelihood():
             td_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
         """
 
-        x_minus_mu = (td_pred_samples-self.td_measured)
+        x_minus_mu = (td_pred_samples - data_vector_global[index_likelihood_list]['td_measured'])
         # add dimension s.t. x_minus_mu is 2D
-        x_minus_mu = np.expand_dims(x_minus_mu,axis=-1)
+        x_minus_mu = np.expand_dims(x_minus_mu, axis=-1)
         # matmul should condense the (# of time delays) dim.
-        exponent = -0.5*np.matmul(np.transpose(x_minus_mu,axes=(0,1,3,2)),
-            np.matmul(self.td_likelihood_prec,x_minus_mu))
+        exponent = -0.5 * np.matmul(np.transpose(x_minus_mu, axes=(0, 1, 3, 2)),
+                                    np.matmul(data_vector_global[index_likelihood_list]['td_likelihood_prec'], x_minus_mu))
 
         # reduce to two dimensions: (n_lenses,n_fpd_samples)
         exponent = np.squeeze(exponent)
 
         # log-likelihood
-        return self.td_likelihood_prefactors + exponent
+        return data_vector_global[index_likelihood_list]['td_likelihood_prefactors'] + exponent
 
-    # TDC Likelihood per lens per fpd sample (only condense along num. images dim.)
-    # TODO: jaxify & jit
-    @staticmethod
-    @jax.jit
-    def jax_td_log_likelihood_per_samp(td_pred_samples,td_measured,
-            td_likelihood_prec,td_likelihood_prefactors):
+
+    def construct_proposed_cosmo(self, hyperparameters):
         """
         Args:
-            td_pred_samples (n_lenses,n_fpd_samps,n_td)
-            td_measured (n_lenses,n_fpd_samps,n_td)
-            td_likelihood_prec (n_lenses,n_fpd_samps,n_td,n_td)
-            td_likelihood_prefactor (n_lenses,n_fpd_samps)
-
-        Returns:
-            td_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
-        """
-
-        x_minus_mu = (td_pred_samples-td_measured)
-        # add dimension s.t. x_minus_mu is 2D
-        x_minus_mu = jnp.expand_dims(x_minus_mu,axis=-1)
-        # matmul should condense the (# of time delays) dim.
-        exponent = -0.5*jnp.matmul(jnp.transpose(x_minus_mu,axes=(0,1,3,2)),
-            jnp.matmul(td_likelihood_prec,x_minus_mu))
-
-        # reduce to two dimensions: (n_lenses,n_fpd_samples)
-        exponent = jnp.squeeze(exponent)
-
-        # log-likelihood
-        return td_likelihood_prefactors + exponent
-        
-        
-    def construct_proposed_cosmo(self,hyperparameters):
-        """
-        Args:
-            hyperparameters (): 
+            hyperparameters ():
                 - LCDM order: [H0,Omega_M,mu_gamma,sigma_gamma]
                 - LCDM_lambda_int order: [H0,Omega_M,mu_lambda_int,
                     sigma_lambda_int,mu_gamma,sigma_gamma]
@@ -221,44 +163,44 @@ class TDCLikelihood():
         h0_input = hyperparameters[0]
         # NOTE: baryonic fraction hardcoded to 0.05
         omega_m_input = hyperparameters[1]
-        omega_c_input = hyperparameters[1] - 0.05 # CDM fraction
+        omega_c_input = hyperparameters[1] - 0.05  # CDM fraction
         omega_de_input = 1. - omega_m_input
-        if self.cosmo_model in ['LCDM','LCDM_lambda_int',
-         'LCDM_lambda_int_beta_ani'] :
-             w0_input = -1.
-             wa_input = 0.
-        elif self.cosmo_model in ['w0waCDM','w0waCDM_lambda_int_beta_ani']:
-             w0_input = hyperparameters[2]
-             wa_input = hyperparameters[3]
+        if self.cosmo_model in ['LCDM', 'LCDM_lambda_int',
+                                'LCDM_lambda_int_beta_ani']:
+            w0_input = -1.
+            wa_input = 0.
+        elif self.cosmo_model in ['w0waCDM', 'w0waCDM_lambda_int_beta_ani']:
+            w0_input = hyperparameters[2]
+            wa_input = hyperparameters[3]
 
-        if self.use_astropy: 
+        if self.use_astropy:
             # instantiate astropy cosmology object
             astropy_cosmo = w0waCDM(H0=h0_input,
-                Om0=omega_m_input,Ode0=omega_de_input,
-                w0=w0_input,wa=wa_input)
-            
+                                    Om0=omega_m_input, Ode0=omega_de_input,
+                                    w0=w0_input, wa=wa_input)
+
             return astropy_cosmo
 
         else:
             # NOTE: baryonic fraction hardcoded to 0.05
-            my_jax_cosmo = jax_cosmo.Cosmology(h=jnp.float32(h0_input/100),
-                        Omega_c=jnp.float32(omega_c_input), # "cold dark matter fraction"
-                        Omega_b=jnp.float32(0.05), # "baryonic fraction"
-                        Omega_k=jnp.float32(0.),
-                        w0=jnp.float32(w0_input),
-                        wa=jnp.float32(wa_input),sigma8 = jnp.float32(0.8), n_s=jnp.float32(0.96))
-            
+            my_jax_cosmo = jax_cosmo.Cosmology(h=jnp.float32(h0_input / 100),
+                                               Omega_c=jnp.float32(omega_c_input),  # "cold dark matter fraction"
+                                               Omega_b=jnp.float32(0.05),  # "baryonic fraction"
+                                               Omega_k=jnp.float32(0.),
+                                               w0=jnp.float32(w0_input),
+                                               wa=jnp.float32(wa_input), sigma8=jnp.float32(0.8), n_s=jnp.float32(0.96))
+
             return my_jax_cosmo
-        
-    def process_hyperparam_proposal(self,hyperparameters):
+
+    def process_hyperparam_proposal(self, hyperparameters):
         """
-        Args: 
-            hyperparameters (): 
+        Args:
+            hyperparameters ():
                 - LCDM order: [H0,Omega_M,mu_gamma,sigma_gamma]
                 - LCDM_lambda_int order: [H0,Omega_M,mu_lambda_int,
                     sigma_lambda_int,mu_gamma,sigma_gamma]
                 - w0waCDM order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
-        Returns: 
+        Returns:
             proposed_cosmo (default=jax_cosmo.Cosmology)
             lambda_int_samples (): Set to None if no lambda_int in hypermodel.
                 If in hypermodel, shape=(num_lenses,num_fpd_samples)
@@ -283,50 +225,51 @@ class TDCLikelihood():
             # truncating to avoid values below 0 (unphysical)
 
         if mu_lint is not None:
-            lambda_int_samples = truncnorm.rvs(-mu_lint/sigma_lint,np.inf,
-                loc=mu_lint,scale=sigma_lint,
-                size=(self.num_lenses,self.num_fpd_samples))
+            lambda_int_samples = truncnorm.rvs(-mu_lint / sigma_lint, np.inf,
+                                               loc=mu_lint, scale=sigma_lint,
+                                               size=(self.num_lenses, self.num_fpd_samples))
 
-        return self.construct_proposed_cosmo(hyperparameters),lambda_int_samples
+        return self.construct_proposed_cosmo(hyperparameters), lambda_int_samples
 
-    def full_log_likelihood(self,hyperparameters):
+    def full_log_likelihood(self, hyperparameters, index_likelihood_list):
         """
         Args:
             hyperparameters ([H0,mu_gamma,sigma_gamma] or [H0,w0,wa,mu_gamma,sigma_gamma])
-            fpd_pred_samples (size:(n_lenses,n_samples,3)): Note, it is assumed 
+            fpd_pred_samples (size:(n_lenses,n_samples,3)): Note, it is assumed
                 that doubles are padded w/ zeros
         """
-        
+
         # construct cosmology + lint samps (if required) from hyperparameters
         proposed_cosmo, lambda_int_samples = self.process_hyperparam_proposal(
             hyperparameters)
 
         # td_pred_samples from fpd_pred_samples
-        td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo,
-            lambda_int_samples)
+        td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo, index_likelihood_list,
+                                                     lambda_int_samples)
         # TODO test jitting this
         if USE_JAX:
-            td_log_likelihoods = self.jax_td_log_likelihood_per_samp(
-                jnp.asarray(td_pred_samples),jnp.asarray(self.td_measured),
-                jnp.asarray(self.td_likelihood_prec),
-                jnp.asarray(self.td_likelihood_prefactors))
+            td_log_likelihoods = jax_utils.jax_td_log_likelihood_per_samp(
+                jnp.asarray(td_pred_samples), jnp.asarray(data_vector_global[index_likelihood_list]['td_measured']),
+                jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prec']),
+                jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prefactors']))
             td_log_likelihoods = np.asarray(td_log_likelihoods)
         else:
             td_log_likelihoods = self.td_log_likelihood_per_samp(
-                td_pred_samples
+                td_pred_samples, index_likelihood_list
             )
 
         # reweighting factor
         # NOTE: hardcoding of hyperparameter order!! (-2 is mu, -1 is sigma)
+        #TODO check this
         if self.use_gamma_info:
-            eval_at_proposed_nu = norm.logpdf(self.gamma_pred_samples,
-                loc=hyperparameters[-2],scale=hyperparameters[-1])
-            rw_factor = eval_at_proposed_nu - self.log_prob_modeling_prior
+            eval_at_proposed_nu = norm.logpdf(data_vector_global[index_likelihood_list]['gamma_pred_samples'],
+                                              loc=hyperparameters[-2], scale=hyperparameters[-1])
+            rw_factor = eval_at_proposed_nu - data_vector_global[index_likelihood_list]['log_prob_gamma_samps_nu_int']
         else:
             rw_factor = 0.
 
-        # sum across fpd samples 
-        individ_likelihood = np.mean(np.exp(td_log_likelihoods+rw_factor),axis=1)
+        # sum across fpd samples
+        individ_likelihood = np.mean(np.exp(td_log_likelihoods + rw_factor), axis=1)
 
         # sum over all lenses
         if np.sum(individ_likelihood == 0) > 0:
@@ -335,54 +278,54 @@ class TDCLikelihood():
         log_likelihood = np.sum(np.log(individ_likelihood))
 
         return log_likelihood
-    
+
     @staticmethod
-    def ddt_posterior_from_td_fpd(td_measured,td_likelihood_prec,fpd_samples,
-            num_emcee_samps=10000):
-        """Computes ddt posterior from measured time delay(s) and 
+    def ddt_posterior_from_td_fpd(td_measured, td_likelihood_prec, fpd_samples,
+                                  num_emcee_samps=10000):
+        """Computes ddt posterior from measured time delay(s) and
             samples from fermat potential difference posterior(s)
             for a SINGLE lens
 
-        The inference: 
-            p(Ddt | delta_t, d_img) /propto p(Ddt) /integral [ 
-                p(delta_t | delta_phi, Ddt) p( delta_phi | d_img, nu_int) 
+        The inference:
+            p(Ddt | delta_t, d_img) /propto p(Ddt) /integral [
+                p(delta_t | delta_phi, Ddt) p( delta_phi | d_img, nu_int)
                 p(delta_phi) / p(delta_phi | nu_int) d delta_phi   ]
 
-        Args: 
+        Args:
             td_measured ([n_td])
             td_likelihood_prec ([n_td,n_td])
             fpd_samples ([n_importance_samples,n_td])
-        
-        Returns: 
+
+        Returns:
             emcee.EnsembleSampler.get_chain()
         """
 
         # set up variables here
         n_td = len(td_measured)
         n_walkers = 10
-        td_likelihood_prefactor = np.log( (1/(2*np.pi)**(n_td/2)) / 
-            np.sqrt(np.linalg.det(np.linalg.inv(td_likelihood_prec))) )
+        td_likelihood_prefactor = np.log((1 / (2 * np.pi) ** (n_td / 2)) /
+                                         np.sqrt(np.linalg.det(np.linalg.inv(td_likelihood_prec))))
 
         def td_log_likelihood(Ddt_proposed):
-            
-            # TODO: check dimensions heres
-            td_predicted = tdc_utils.td_from_ddt_fpd(Ddt_proposed,fpd_samples)
 
-            x_minus_mu = (td_predicted-td_measured)
+            # TODO: check dimensions heres
+            td_predicted = tdc_utils.td_from_ddt_fpd(Ddt_proposed, fpd_samples)
+
+            x_minus_mu = (td_predicted - td_measured)
             # add dimension s.t. x_minus_mu is 2D
-            x_minus_mu = np.expand_dims(x_minus_mu,axis=-1)
+            x_minus_mu = np.expand_dims(x_minus_mu, axis=-1)
             # matmul should condense the (# of time delays) dim.
             # TODO: probably only 3 dimensions here? check...
-            exponent = -0.5*np.matmul(np.transpose(x_minus_mu,axes=(0,2,1)),
-                np.matmul(td_likelihood_prec,x_minus_mu))
+            exponent = -0.5 * np.matmul(np.transpose(x_minus_mu, axes=(0, 2, 1)),
+                                        np.matmul(td_likelihood_prec, x_minus_mu))
 
             # reduce to one dimension: (n_fpd_samples)
             exponent = np.squeeze(exponent)
 
-            imp_samp_likelihood = np.mean(np.exp(td_likelihood_prefactor+exponent))
+            imp_samp_likelihood = np.mean(np.exp(td_likelihood_prefactor + exponent))
 
             return np.log(imp_samp_likelihood)
-        
+
         def td_log_posterior(Ddt_proposed):
 
             # what's a good prior for Ddt?
@@ -391,117 +334,48 @@ class TDCLikelihood():
             else:
                 return td_log_likelihood(Ddt_proposed)
 
-
         # set-up emcee sampler
-        cur_state = np.empty((n_walkers,1))
-        cur_state[:,0] = uniform.rvs(loc=0.,scale=15000.,size=n_walkers) 
+        cur_state = np.empty((n_walkers, 1))
+        cur_state[:, 0] = uniform.rvs(loc=0., scale=15000., size=n_walkers)
         sampler = emcee.EnsembleSampler(n_walkers,
-            cur_state.shape[1],td_log_posterior)
+                                        cur_state.shape[1], td_log_posterior)
 
         # run mcmc
-        _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
+        _ = sampler.run_mcmc(cur_state, nsteps=num_emcee_samps, progress=True)
 
         # return chain
         return sampler.get_chain()
+    
 
 
-############
-# TDC + Kin
-############
-
-# TODO: implement this class
 class TDCKinLikelihood(TDCLikelihood):
 
-    def __init__(self,td_measured,td_likelihood_prec,
-        sigma_v_measured,sigma_v_likelihood_prec,
-        fpd_samples,gamma_pred_samples,kin_pred_samples,z_lens,z_src,
-        kappa_ext_samples=None,
-        log_prob_gamma_nu_int=None,cosmo_model='LCDM',use_gamma_info=True,
-        beta_ani_samples=None,log_prob_beta_ani_nu_int=None,
-        use_astropy=False):
+    def __init__(self, fpd_sample_shape, kin_pred_samples_shape,
+                 cosmo_model='LCDM' ,use_gamma_info=True,
+                 use_astropy=False):
         """
         Keep track of quantities that remain constant throughout the inference
 
-        Args: 
-            td_measured: array of td_measured 
-                doubles: (n_lenses,1)
-                quads: (n_lenses,3)
-            td_likelihood_prec: array of precision matrices: 
-                - doubles: ((1/sigma^2))
-                - quads: ((1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2))
-            sigma_v_measured: 
-                single-aperture: (n_lenses,1)
-                IFU: (n_lenses,n_bins)
-            sigma_v_likelihood_prec: array of Gaussian measurement error 
-                in the form of precision matrices
-            fpd_samples: array of fermat potential difference posterior samples
-                doubles: (n_lenses,n_fpd_samples,1)
-                quads: (n_lenses,n_fpd_samples,3)
-            gamma_pred_samples (np.array(float)): 
-                gamma samples associated with each set of fpd samples.
-                (n_lenses,n_fpd_samples)
-            kin_pred_samples (np.array(float)): this tracks the quantity:
-                 c*sqrt(mathcal{J}(xi_mass,xi_light,beta_ani)),
-                this is the "dimensionless and cosmology-independent term of 
-                the Jeans equation", see Eqn 17 in TDCOSMO IV:  
-                 sigma_v = c * sqrt(D_s/D_ds) * sqrt(mathcal{J})
-                size of array: (n_lenses,n_fpd_samples,num_kin_bins)
-            z_lens (np.array(float), size:(n_lenses)): lens redshifts
-            z_src (np.array(float), size:(n_lenses)): source redshifts
+        Args:
+            fpd_sample_shape: shape of fpd samples (n_lenses,n_fpd_samples,dim_fpd)
+            kin_pred_samples_shape: shape of kinematic samples (n_lenses,n_fpd_samples,num_kin_bins)
             log_prob_gamma_nu_int: TODO
-            cosmo_model (string): 'LCDM', 'w0waCDM', 'LCDM_lambda_int', or 
+            cosmo_model (string): 'LCDM', 'w0waCDM', 'LCDM_lambda_int', or
                 'LCDM_lambda_int_beta_ani'
             use_gamma_info (bool): If False, removes reweighting from likelihood
-                evaluation (any population level gamma params should just 
+                evaluation (any population level gamma params should just
                 return the prior then...)
             beta_ani_samples (): None if beta_ani not in population model
                 (n_lenses,n_fpd_samples)
-            log_prob_beta_ani_nu_int: TODO
         """
 
-        super().__init__(td_measured,td_likelihood_prec,fpd_samples,
-            gamma_pred_samples,z_lens,z_src,kappa_ext_samples,
-            log_prob_gamma_nu_int,cosmo_model,use_gamma_info,
-            use_astropy)
+        super().__init__(fpd_sample_shape, cosmo_model ,use_gamma_info,
+                         use_astropy)
 
-        # track kinematic information
-        self.num_kin_bins = kin_pred_samples.shape[2]
-        self.kin_pred_samples = kin_pred_samples
+        self.num_kin_bins = kin_pred_samples_shape[2]
 
-        # pad measurements with a 2nd batch dim for # of fpd samples
-        self.sigma_v_measured = np.repeat(sigma_v_measured[:, np.newaxis, :],
-            self.num_fpd_samples, axis=1)
-        self.sigma_v_likelihood_prec = np.repeat(
-            sigma_v_likelihood_prec[:, np.newaxis, :, :],
-            self.num_fpd_samples, axis=1)
-        
-        k_dim = self.num_kin_bins
-        self.sigma_v_likelihood_prefactors = np.log( (1/(2*np.pi)**(k_dim/2)) / 
-            np.sqrt(np.linalg.det(np.linalg.inv(self.sigma_v_likelihood_prec))))
-        
-        # TODO
-        if cosmo_model in ['LCDM_lambda_int_beta_ani','w0waCDM_lambda_int_beta_ani']:
-            # check that beta_ani_samples are provided...
-            if beta_ani_samples is None:
-                raise ValueError('Must provide beta_ani_samples if using '+
-                    'beta_ani in cosmo_model')
-            
-            self.beta_ani_samples = beta_ani_samples
-            # handle beta_ani hierarchically
-            if log_prob_beta_ani_nu_int is None:
-                # default: assume un-informative prior
-                self.log_prob_beta_ani_nu_int = uniform.logpdf(
-                    beta_ani_samples,loc=-0.5,scale=1.)
-            else:
-                # user-provided modeling prior
-                self.log_prob_beta_ani_nu_int = np.empty((beta_ani_samples.shape))
-                for i in range(0,beta_ani_samples.shape[0]):
-                    self.log_prob_beta_ani_nu_int[i,:] = log_prob_beta_ani_nu_int(
-                        beta_ani_samples[i])
-        
 
-    #@partial(jit, static_argnums=(3,)) (re-compiles for every different value of argument index 3)
-    def sigma_v_pred_from_kin_pred(self,proposed_cosmo,lambda_int_samples=None):
+    def sigma_v_pred_from_kin_pred(self ,proposed_cosmo,index_likelihood_list, lambda_int_samples=None):
         """
         Args:
             proposed_cosmo (default: jax_cosmo.Cosmology): built by
@@ -511,42 +385,44 @@ class TDCKinLikelihood(TDCLikelihood):
 
         if self.use_astropy:
             Ds_div_Dds_computed = tdc_utils.kin_distance_ratio(
-                proposed_cosmo,self.z_lens,self.z_src
-            )
-            #raise ValueError("astropy option not implemented for TDC+Kin")
+                proposed_cosmo , data_vector_global[index_likelihood_list]['z_lens'],
+                data_vector_global[index_likelihood_list]['z_src'])
+
+            # raise ValueError("astropy option not implemented for TDC+Kin")
         else:
             Ds_div_Dds_computed = tdc_utils.jax_kin_distance_ratio(
-                proposed_cosmo,self.z_lens,self.z_src)
-        
+                proposed_cosmo, data_vector_global[index_likelihood_list]['z_lens'],
+                data_vector_global[index_likelihood_list]['z_src'])
+
         Ds_div_Dds_computed = np.array(Ds_div_Dds_computed)
         # add batch dimensions for fpd_samples
         Ds_div_Dds_repeated = np.repeat(Ds_div_Dds_computed[:, np.newaxis],
-            self.num_fpd_samples, axis=1) 
+                                        self.num_fpd_samples, axis=1)
         # add batch dimension for # kinematic bins
         Ds_div_Dds_repeated = np.repeat(Ds_div_Dds_repeated[:, :, np.newaxis],
-            self.num_kin_bins, axis=2) 
+                                        self.num_kin_bins, axis=2)
         # scale the kin_pred with cosmology term: sigma_v = sqrt(Ds/Dds)*c*sqrt(mathcal{J})
-        sigma_v_pred = np.sqrt(Ds_div_Dds_repeated)*self.kin_pred_samples
+        sigma_v_pred = np.sqrt(Ds_div_Dds_repeated ) *data_vector_global[index_likelihood_list]['kin_pred_samples']
 
-        # Account for mass sheets: 
+        # Account for mass sheets:
         #   sigma_v = sqrt(lambda) * sigma_v
         #   lambda = (1-kappa_ext)*lambda_int
 
         # sqrt(lambda) scaling if lambda_int is present
         if lambda_int_samples is not None:
-            lambda_int_repeated = np.repeat(lambda_int_samples[:,:,np.newaxis],
-                self.num_kin_bins, axis=2)
+            lambda_int_repeated = np.repeat(lambda_int_samples[: ,: ,np.newaxis],
+                                            self.num_kin_bins, axis=2)
             sigma_v_pred *= np.sqrt(lambda_int_repeated)
         # sqrt(1-kappa_ext) scaling
-        if self.kappa_ext_samples is not None:
-            kappa_ext_repeated = np.repeat(self.kappa_ext_samples[:,:,np.newaxis],
-                self.num_kin_bins, axis=2)
+        if data_vector_global[index_likelihood_list]['kappa_ext_samples'] is not None:
+            kappa_ext_repeated = np.repeat(data_vector_global[index_likelihood_list]['kappa_ext_samples'][: ,: ,np.newaxis],
+                                           self.num_kin_bins, axis=2)
             sigma_v_pred *= np.sqrt(1 - kappa_ext_repeated)
 
         return sigma_v_pred
-    
+
     # TODO: jaxify & jit
-    def sigma_v_log_likelihood_per_samp(self,sigma_v_pred_samples):
+    def sigma_v_log_likelihood_per_samp(self,sigma_v_pred_samples, index_likelihood_list):
         """
         Args:
             sigma_v_pred_samples (n_lenses,n_fpd_samps,num_kin_bins)
@@ -555,49 +431,21 @@ class TDCKinLikelihood(TDCLikelihood):
             sigma_v_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
         """
 
-        x_minus_mu = (sigma_v_pred_samples-self.sigma_v_measured)
+        x_minus_mu = (sigma_v_pred_samples -data_vector_global[index_likelihood_list]['sigma_v_measured'])
         # add dimension s.t. x_minus_mu is 2D
-        x_minus_mu = np.expand_dims(x_minus_mu,axis=-1)
+        x_minus_mu = np.expand_dims(x_minus_mu ,axis=-1)
         # matmul should condense the (# of time delays) dim.
-        exponent = -0.5*np.matmul(np.transpose(x_minus_mu,axes=(0,1,3,2)),
-            np.matmul(self.sigma_v_likelihood_prec,x_minus_mu))
+        exponent = -0.5 *np.matmul(np.transpose(x_minus_mu ,axes=(0 ,1 ,3 ,2)),
+                                  np.matmul(data_vector_global[index_likelihood_list]['sigma_v_likelihood_prec'],x_minus_mu))
 
         # reduce to two dimensions: (n_lenses,n_fpd_samples)
         exponent = np.squeeze(exponent)
 
         # log-likelihood
-        return self.sigma_v_likelihood_prefactors + exponent
+        return data_vector_global[index_likelihood_list]['sigma_v_likelihood_prefactors'] + exponent
     
-    @staticmethod
-    @jax.jit
-    def jax_sigma_v_log_likelihood_per_samp(sigma_v_pred_samples,sigma_v_measured,
-            sigma_v_likelihood_prec,sigma_v_likelihood_prefactors):
-        """
-        Args:
-            sigma_v_pred_samples (n_lenses,n_fpd_samps,num_kinbins)
-            sigma_v_measured (n_lenses,n_fpd_samps,num_kinbins)
-            sigma_v_likelihood_prec (n_lenses,n_fpd_samps,n_kinbins,n_kinbins)
-            sigma_v_likelihood_prefactor (n_lenses,n_fpd_samps)
 
-        Returns:
-            sigma_v_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
-        """
-
-        x_minus_mu = (sigma_v_pred_samples-sigma_v_measured)
-        # add dimension s.t. x_minus_mu is 2D
-        x_minus_mu = jnp.expand_dims(x_minus_mu,axis=-1)
-        # matmul should condense the (# of time delays) dim.
-        exponent = -0.5*jnp.matmul(jnp.transpose(x_minus_mu,axes=(0,1,3,2)),
-            jnp.matmul(sigma_v_likelihood_prec,x_minus_mu))
-
-        # reduce to two dimensions: (n_lenses,n_fpd_samples)
-        exponent = jnp.squeeze(exponent)
-
-        # log-likelihood
-        return sigma_v_likelihood_prefactors + exponent
-
-
-    def full_log_likelihood(self, hyperparameters):
+    def full_log_likelihood(self, hyperparameters, index_likelihood_list):
 
         # construct cosmology from hyperparameters
         proposed_cosmo, lambda_int_samples = self.process_hyperparam_proposal(
@@ -605,56 +453,61 @@ class TDCKinLikelihood(TDCLikelihood):
 
         # td log likelihood per sample
         td_pred_samples = self.td_pred_from_fpd_pred(
-            proposed_cosmo,lambda_int_samples)
+            proposed_cosmo, index_likelihood_list, lambda_int_samples)
         # TODO: test jitting this
-        td_log_likelihoods = self.jax_td_log_likelihood_per_samp(
-            jnp.asarray(td_pred_samples),jnp.asarray(self.td_measured),
-            jnp.asarray(self.td_likelihood_prec),
-            jnp.asarray(self.td_likelihood_prefactors))
+        if USE_JAX:
+            td_log_likelihoods = jax_utils.jax_td_log_likelihood_per_samp(
+                jnp.asarray(td_pred_samples) ,jnp.asarray(data_vector_global[index_likelihood_list]['td_measured']),
+                jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prec']),
+                jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prefactors']))
+        else:
+            td_log_likelihoods = self.td_log_likelihood_per_samp(
+                td_pred_samples, index_likelihood_list
+            )
         td_log_likelihoods = np.asarray(td_log_likelihoods)
 
         # kin log likelihood per sample
         sigma_v_pred_samples = self.sigma_v_pred_from_kin_pred(
-            proposed_cosmo,lambda_int_samples)
+            proposed_cosmo, index_likelihood_list, lambda_int_samples)
         # TODO: test jitting this
         if USE_JAX:
-            sigma_v_log_likelihoods = self.jax_sigma_v_log_likelihood_per_samp(
+            sigma_v_log_likelihoods = jax_utils.jax_sigma_v_log_likelihood_per_samp(
                 jnp.asarray(sigma_v_pred_samples),
-                jnp.asarray(self.sigma_v_measured),
-                jnp.asarray(self.sigma_v_likelihood_prec),
-                jnp.asarray(self.sigma_v_likelihood_prefactors))
+                jnp.asarray(data_vector_global[index_likelihood_list]['sigma_v_measured']),
+                jnp.asarray(data_vector_global[index_likelihood_list]['sigma_v_likelihood_prec']),
+                jnp.asarray(data_vector_global[index_likelihood_list]['sigma_v_likelihood_prefactors']))
             sigma_v_log_likelihoods = np.asarray(sigma_v_log_likelihoods)
         else:
             sigma_v_log_likelihoods = self.sigma_v_log_likelihood_per_samp(
-                sigma_v_pred_samples
+                sigma_v_pred_samples, index_likelihood_list
             )
 
         # reweighting factor
         # NOTE: hardcoding of hyperparameter order!! (-2 is mu, -1 is sigma)
         if self.use_gamma_info:
-            eval_at_proposed_nu = norm.logpdf(self.gamma_pred_samples,
-                loc=hyperparameters[-2],scale=hyperparameters[-1])
-            rw_factor = eval_at_proposed_nu - self.log_prob_modeling_prior
+            eval_at_proposed_nu = norm.logpdf(data_vector_global[index_likelihood_list]['gamma_pred_samples'],
+                                              loc=hyperparameters[-2] ,scale=hyperparameters[-1])
+            rw_factor = eval_at_proposed_nu - data_vector_global[index_likelihood_list]['log_prob_gamma_samps_nu_int']
         else:
             rw_factor = 0.
 
-        if self.cosmo_model in ['LCDM_lambda_int_beta_ani','w0waCDM_lambda_int_beta_ani']:
-            eval_at_proposed_beta_pop = norm.logpdf(self.beta_ani_samples,
-                loc=hyperparameters[-4],scale=hyperparameters[-3])
-            beta_rw_factor = eval_at_proposed_beta_pop - self.log_prob_beta_ani_nu_int
+        if self.cosmo_model in ['LCDM_lambda_int_beta_ani' ,'w0waCDM_lambda_int_beta_ani']:
+            eval_at_proposed_beta_pop = norm.logpdf(data_vector_global[index_likelihood_list]['beta_ani_samples'],
+                                                    loc=hyperparameters[-4] ,scale=hyperparameters[-3])
+            beta_rw_factor = eval_at_proposed_beta_pop - data_vector_global[index_likelihood_list]['log_prob_beta_ani_samps_nu_int']
             rw_factor += beta_rw_factor
 
         # TODO: testing some jitting here (jit doesn't like the ==0 statement)
 
         if USE_JAX:
-            individ_likelihood = jax_fpd_samp_summation(jnp.asarray(
-                td_log_likelihoods+sigma_v_log_likelihoods+rw_factor))
+            individ_likelihood = jax_utils.jax_fpd_samp_summation(jnp.asarray(
+                td_log_likelihoods +sigma_v_log_likelihoods +rw_factor))
             individ_likelihood = np.asarray(individ_likelihood)
 
         else:
-            # sum across fpd samples 
+            # sum across fpd samples
             individ_likelihood = np.mean(
-                np.exp(td_log_likelihoods+sigma_v_log_likelihoods+rw_factor),
+                np.exp(td_log_likelihoods +sigma_v_log_likelihoods +rw_factor),
                 axis=1)
 
         # sum over all lenses
@@ -663,29 +516,12 @@ class TDCKinLikelihood(TDCLikelihood):
             log_likelihood = -jnp.inf
 
         if USE_JAX:
-            log_likelihood = jax_lenses_summation(jnp.asarray(individ_likelihood))
+            log_likelihood = jax_utils.jax_lenses_summation(jnp.asarray(individ_likelihood))
         else:
             log_likelihood = np.sum(np.log(individ_likelihood))
 
         return log_likelihood
 
-
-
-@jax.jit
-def jax_fpd_samp_summation(log_likelihoood_per_samp):
-    """
-        log_likelihood_per_samp (n_lenses,n_fpd_samps)
-    """
-    return jnp.mean(jnp.exp(log_likelihoood_per_samp),axis=1)
-
-@jax.jit
-def jax_lenses_summation(individ_likelihood):
-    """
-        individ_likelihood (n_lenses)
-    """
-    return jnp.sum(jnp.log(individ_likelihood))
-
-    
 
 #########################
 # Sampling Implementation
@@ -871,19 +707,20 @@ def generate_initial_state(n_walkers,cosmo_model):
         return cur_state
     
     if cosmo_model == 'w0waCDM_lambda_int_beta_ani':
+        # TODO: try this one with intializing with a compact ball!
         # order: [H0,Omega_M,w0,wa,mu_lambda_int,sigma_lambda_int,
         #   mu_beta_ani,sigma_beta_ani,mu_gamma,sigma_gamma]
         cur_state = np.empty((n_walkers,10))
-        cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
-        cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
-        cur_state[:,2] = uniform.rvs(loc=-1.5,scale=1.,size=n_walkers) #w0
-        cur_state[:,3] = uniform.rvs(loc=-1,scale=2,size=n_walkers) #wa
-        cur_state[:,4] = uniform.rvs(loc=0.9,scale=0.2,size=n_walkers)
-        cur_state[:,5] = uniform.rvs(loc=0.001,scale=0.499,size=n_walkers)
-        cur_state[:,6] = uniform.rvs(loc=-0.1,scale=0.2,size=n_walkers)
-        cur_state[:,7] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
-        cur_state[:,8] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
-        cur_state[:,9] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
+        cur_state[:,0] = norm.rvs(loc=70.,scale=5.,size=n_walkers) #h0
+        cur_state[:,1] = truncnorm.rvs(-.3/.1,.2/0.1,loc=0.3,scale=0.1,size=n_walkers) #Omega_M
+        cur_state[:,2] = truncnorm.rvs(-1/.2,1/.2,loc=-1.,scale=0.2,size=n_walkers) #w0
+        cur_state[:,3] = truncnorm.rvs(-1/.2,1/.2,loc=0.,scale=0.2,size=n_walkers) #wa
+        cur_state[:,4] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=1.,scale=0.1,size=n_walkers) # mu(lambda_int)
+        cur_state[:,5] = uniform.rvs(loc=0.01,scale=0.49,size=n_walkers)
+        cur_state[:,6] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=0.,scale=0.1,size=n_walkers) # mu(beta_ani)
+        cur_state[:,7] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+        cur_state[:,8] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=2.,scale=0.1,size=n_walkers) # mu(gamma_lens)
+        cur_state[:,9] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
 
         return cur_state
 
@@ -914,14 +751,86 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
         lp = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
     # Likelihood
     if lp == 0:
-        for tdc_likelihood in tdc_likelihood_list:
-            fll = tdc_likelihood.full_log_likelihood(hyperparameters)
+        for i, tdc_likelihood in enumerate(tdc_likelihood_list):
+            fll = tdc_likelihood.full_log_likelihood(hyperparameters, index_likelihood_list = i)
             lp += fll
 
     return lp
 
-def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
-    n_walkers=20, use_mpi=False, backend_path=None, reset_backend=True):
+def prepare_data_vector_list(data_vector_list, tdc_likelihood_list):
+    """
+    Args:
+        data_vector_list ([DataVector]): list of data vector objects (dictionnary)
+    """
+
+    print("Preparing data vector list for sampling...")
+
+    #expand the axis according to the number of samples in the data vector
+    for i in range(len(data_vector_list)):
+        #expand the axis according to the number of samples in the data vector
+        num_lenses, num_fpd_samples, dim_fpd= data_vector_list[i]['fpd_samples'].shape
+        data_vector_list[i]['td_measured'] = np.repeat(data_vector_list[i]['td_measured'][:, np.newaxis, :],
+                num_fpd_samples, axis=1)
+        data_vector_list[i]['td_likelihood_prec'] = np.repeat(data_vector_list[i]['td_likelihood_prec'][:, np.newaxis, :, :],
+            num_fpd_samples, axis=1)
+
+        data_vector_list[i]['td_likelihood_prefactors'] = np.log( (1/(2*np.pi)**(dim_fpd/2)) /
+                np.sqrt(np.linalg.det(np.linalg.inv(data_vector_list[i]['td_likelihood_prec']))) )
+
+        # evaluate the modeling prior for gamma_lens from a provided distribution or on the provided samples
+        if tdc_likelihood_list[i].log_prob_gamma_nu_int is None:
+            #default prior
+            log_prob_modeling_prior = uniform.logpdf(data_vector_list[i]['gamma_pred_samples'], loc=1., scale=2.)
+
+        else:
+            log_prob_modeling_prior = np.empty((data_vector_list[i]['gamma_pred_samples'].shape))
+            for j in range(0, data_vector_list[i]['gamma_pred_samples'].shape[0]):
+                log_prob_modeling_prior[i, :] = tdc_likelihood_list[i].log_prob_gamma_nu_int(data_vector_list[i]['gamma_pred_samples'][j])
+
+        data_vector_list[i]['log_prob_modeling_prior'] = log_prob_modeling_prior
+
+        if isinstance(tdc_likelihood_list[i], TDCKinLikelihood):
+            #expand the axis according to the number of samples in the data vector
+            if 'kin_pred_samples' in data_vector_list[i]:
+                num_kin_bins = data_vector_list[i]['kin_pred_samples'].shape[2]
+                # pad measurements with a 2nd batch dim for # of fpd samples
+                data_vector_list[i]['sigma_v_measured'] = np.repeat(
+                    data_vector_list[i]['sigma_v_measured'][:, np.newaxis, :],
+                    num_fpd_samples, axis=1)
+                data_vector_list[i]['sigma_v_likelihood_prec'] = np.repeat(
+                    data_vector_list[i]['sigma_v_likelihood_prec'][:, np.newaxis, :, :],
+                    num_fpd_samples, axis=1)
+
+                data_vector_list[i]['sigma_v_likelihood_prefactors'] = np.log((1 / (2 * np.pi) ** (num_kin_bins / 2)) /
+                                                                              np.sqrt(np.linalg.det(np.linalg.inv(
+                                                                                  data_vector_list[i][
+                                                                                      'sigma_v_likelihood_prec']))))
+            else:
+                raise ValueError('kin_pred_samples not found in data_vector_list whereas TDCKinLikelihood is used')
+
+
+            if tdc_likelihood_list[i].cosmo_model in ['LCDM_lambda_int_beta_ani' ,'w0waCDM_lambda_int_beta_ani']:
+                # check that beta_ani_samples are provided...
+                if not 'beta_ani_samples' in data_vector_list[i] or data_vector_list[i]['beta_ani_samples'] is None:
+                    raise ValueError('Must provide beta_ani_samples if using  '+
+                                     'beta_ani in cosmo_model')
+
+                # evaluate the modeling prior from a provided distribution or on the provided samples
+                if tdc_likelihood_list[i].log_prob_beta_ani_nu_int is None:
+                    # default: assume un-informative prior
+                    data_vector_list[i]['log_prob_beta_ani_nu_int'] = uniform.logpdf(
+                        data_vector_list[i]['beta_ani_samples'],loc=-0.5 ,scale=1.)
+                else:
+                    # user-provided modeling prior
+                    data_vector_list[i]['log_prob_beta_ani_nu_int'] = np.empty((data_vector_list[i]['beta_ani_samples'].shape))
+                    for j in range(0, data_vector_list[i]['beta_ani_samples'].shape[0]):
+                        data_vector_list[i]['log_prob_beta_ani_nu_int'][j, :] = tdc_likelihood_list[i].log_prob_beta_ani_nu_int(
+                            data_vector_list[i]['beta_ani_samples'][j])
+
+    return data_vector_list
+
+def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
+    n_walkers=20, use_mpi=False, use_multiprocess=False, backend_path=None, reset_backend=True):
     """
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
@@ -941,6 +850,12 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
         if tdc_likelihood_list[i].cosmo_model != cosmo_model:
             raise ValueError("")
 
+    # TODO: prepare the data vectors
+
+    # make the variable global to speed up multiprocessing access during the sampling
+    global data_vector_global
+    data_vector_global = data_vector_list
+
     log_posterior_fn = partial(log_posterior, cosmo_model=cosmo_model,
         tdc_likelihood_list=tdc_likelihood_list)
 
@@ -948,22 +863,19 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
     cur_state = generate_initial_state(n_walkers,cosmo_model)
 
     print('Initial likelihood call : ')
-    hyperparameters_init = [6.47242793e+01, 2.33623746e-01, 9.14884078e-01, 1.34268817e-01,
+    if cosmo_model == 'LCDM_lambda_int_beta_ani':
+        hyperparameters_init = [6.47242793e+01, 2.33623746e-01, 9.14884078e-01, 1.34268817e-01,
+                            -3.15238075e-02, 8.41097628e-02, 2.22904902e+00, 8.78549539e-03]
+    elif cosmo_model == 'w0waCDM_lambda_int_beta_ani':
+        hyperparameters_init = [6.47242793e+01, 2.33623746e-01, -1., 0., 9.14884078e-01, 1.34268817e-01,
                             -3.15238075e-02, 8.41097628e-02, 2.22904902e+00, 8.78549539e-03]
     print('hyperparameters_init', hyperparameters_init)
-    log_posterior(hyperparameters_init, 'LCDM_lambda_int_beta_ani',
+    log_post_val = log_posterior(hyperparameters_init, cosmo_model,
                   tdc_likelihood_list)
-    print('log_posterior', log_posterior(hyperparameters_init, cosmo_model, tdc_likelihood_list))
-    print('expected : log_posterior -1309.0113851331898')
+    print('log_posterior', log_post_val)
 
     # emcee stuff here
     if not use_mpi:
-        #from multiprocessing import Pool, cpu_count
-        #cpu_count = cpu_count()
-        #print("Using multiprocessing for parallelization...")
-        #print("Number of CPUs: %d"%cpu_count)
-        #with Pool() as pool:
-
         backend = None
         if backend_path is not None:
             backend = emcee.backends.HDFBackend(backend_path)
@@ -971,13 +883,29 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
             if reset_backend:
                 backend.reset(n_walkers,cur_state.shape[1])
 
-        sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
-            log_posterior_fn,backend=backend)
-        # run mcmc
-        tik_mcmc = time.time()
-        _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
-        tok_mcmc = time.time()
-        print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+        if use_multiprocess:
+            from multiprocess import Pool, cpu_count
+            cpu_count = cpu_count()
+            print("Using multiprocessing for parallelization...")
+            print("Number of CPUs: %d" % cpu_count)
+            with Pool() as pool:
+                sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
+                    log_posterior_fn,backend=backend, pool=pool)
+
+                # run mcmc
+                tik_mcmc = time.time()
+                _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
+                tok_mcmc = time.time()
+                print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+        else:
+            sampler = emcee.EnsembleSampler(n_walkers, cur_state.shape[1],
+                                            log_posterior_fn, backend=backend)
+
+            # run mcmc
+            tik_mcmc = time.time()
+            _ = sampler.run_mcmc(cur_state, nsteps=num_emcee_samps, progress=True)
+            tok_mcmc = time.time()
+            print("Avg. Time per MCMC Step: %.3f seconds" % ((tok_mcmc - tik_mcmc) / num_emcee_samps))
     else: 
         print("Using MPI for parallelization...")
         from schwimmbad import MPIPool
@@ -985,10 +913,28 @@ def fast_TDC(tdc_likelihood_list,num_emcee_samps=1000,
             if not pool.is_master():
                 pool.wait()
                 sys.exit(0)
-            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],log_posterior_fn, pool=pool)
+
+            # should be safe to put backend here? since only master is running this line?
+            backend = None
+            if backend_path is not None:
+                backend = emcee.backends.HDFBackend(backend_path)
+                # if False, will pick-up where chain left off
+                if reset_backend:
+                    backend.reset(n_walkers,cur_state.shape[1])
+                #else:
+                #    last_pos = backend.get_last_sample()#.coords
+                #    cur_state = last_pos
+
+            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
+                log_posterior_fn, pool=pool, backend=backend)
+            
             # run mcmc
             tik_mcmc = time.time()
-            _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
+            if not reset_backend and backend is not None:
+                # init_state=None will have it pick-up where it left off?
+                _ = sampler.run_mcmc(None,nsteps=num_emcee_samps,progress=False)
+            else:
+                _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
             tok_mcmc = time.time()
             print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
         

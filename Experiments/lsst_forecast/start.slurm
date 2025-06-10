@@ -30,7 +30,7 @@ option_args="${OPTION_ARGS}"
 
 # Compare the value
 if [ "$cpu_per_task" -gt 1 ]; then
-    option_args="${option_args} --threadCount $cpu_per_task"
+    option_args="${option_args} --use-multiprocess"
     echo "Using $cpu_per_task CPUs per task"
 else
     echo "cpu_per_task is 1 or less: $cpu_per_task"
