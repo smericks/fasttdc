@@ -267,7 +267,8 @@ def create_static_data_vectors(
         data_vector_dict['kappa_ext_samples'] = kappa_ext_samps
 
         if kinematic_type is not None:
-            if cosmo_model in ['LCDM_lambda_int_beta_ani','w0waCDM_lambda_int_beta_ani']:
+            if cosmo_model in ['LCDM_lambda_int_beta_ani',
+                'w0waCDM_lambda_int_beta_ani','w0waCDM_fullcPDF']:
                 data_vector_dict['beta_ani_samples'] = gaussian_samps[:,:,beta_idx]
             data_vector_dict['kin_pred_samples'] = gaussian_samps[:,:,-num_kin_bins:]
     else:
