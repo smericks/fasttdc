@@ -201,8 +201,7 @@ class TDCLikelihood():
             mu_lint = hyperparameters[-4]
             sigma_lint = hyperparameters[-3]
         elif self.cosmo_model in ['LCDM_lambda_int_beta_ani',
-                                  'w0waCDM_lambda_int_beta_ani',
-                                  'w0waCDM_fullcPDF']:
+                                  'w0waCDM_lambda_int_beta_ani']:
             # NOTE: hardcoding of hyperparameter order!! (-6 is mu, -5 is sigma)
             mu_lint = hyperparameters[-6]
             sigma_lint = hyperparameters[-5]
@@ -558,7 +557,35 @@ class TDCKinLikelihood(TDCLikelihood):
             log_likelihood = np.sum(np.log(individ_likelihood))
 
         return log_likelihood
+    
+class TDCKinLikelihoodAnalytical(TDCKinLikelihood):
 
+
+    def fancyA(proposed_cosmo,):
+
+        # calculate DdeltaT once for each lens
+
+        # multiply into lambda_int, kappa_ext samples
+        return 1
+
+    def fancyB(proposed_cosmo,):
+
+        return 1
+
+    def full_log_likelihood(self,hyperparameters):
+        
+        # construct cosmology from hyperparameters
+        proposed_cosmo, lambda_int_samples = self.process_hyperparam_proposal(
+            hyperparameters)
+
+        # fancyA = lambda_int*(1-kappa_ext)*Ddeltat(Omega)/c
+        # fancyB = sqrt(Ds(Omega)/Dds(Omega))*sqrt(lambda_int*(1-kappa_ext))TODO
+
+        # importance sample over lambda_int and kappa_ext 
+        # all arguments have dimension (num_importance_samples)
+        integrand_per_samp = 1 #TODO:analytic_f(fancyA,fancyB,lambda_int,kappa_ext)
+        likelihood = np.mean(integrand_per_samp)
+    
 
 #########################
 # Sampling Implementation
