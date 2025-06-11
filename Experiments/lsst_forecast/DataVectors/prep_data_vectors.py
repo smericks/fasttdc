@@ -124,7 +124,8 @@ def create_static_data_vectors(
     kinematic_type=None,
     kin_meas_error_percent=None,kin_meas_error_kmpersec=None,
     num_gaussianized_samps=None,
-    log_prob_gamma_nu_int=None,
+    lens_params_nu_int_means=None,
+    lens_params_nu_int_stddevs=None,
     log_prob_beta_ani_nu_int=None):
     """
     Args:
@@ -137,7 +138,10 @@ def create_static_data_vectors(
         num_gaussianized_samps (int): Default=None (use samples as is). If specified,
             a Gaussian will be fit to the provided samples, and a new batch of 
             |num_gaussianized_samps| samples will be drawn from that distribution 
-        log_prob_gamma_nu_int (callable): default=None
+        lens_params_nu_int_means ([float]): Means of the training prior, default=None.
+            Must have dim (n_lens_params)
+        lens_params_nu_int_stddevs ([float]): Std. Devs. of the training prior,default=None
+            Must have dim (n_lens_params)
         log_prob_beta_ani_nu_int (callable): default=None
     
     Returns: 
@@ -185,6 +189,7 @@ def create_static_data_vectors(
     # set up some sizes
     num_lenses = np.shape(fpd_samps)[0]
     num_td = np.shape(fpd_samps)[-1]
+    num_lp = np.shape(lens_param_samps)[-1]
             
     # load in from metadata file
     all_metadata_df = pd.read_csv(metadata_file)
@@ -221,15 +226,15 @@ def create_static_data_vectors(
         fpd_truth = retrieve_truth_fpd(metadata_df,num_td)
         for i in range(0,num_td):
             to_gaussianize_input.append(fpd_samps[:,:,i])
-        # gamma_lens
-        to_gaussianize_input.append(lens_param_samps[:,:,3])
-        gamma_idx = num_td
+        # TODO: all lens params
+        for lp in range(0,num_lp):
+            to_gaussianize_input.append(lens_param_samps[:,:,lp])
 
         # kinematics
         if kinematic_type is not None:
             # beta_ani
             to_gaussianize_input.append(beta_ani_samps)
-            beta_idx = num_td+1
+            beta_idx = num_td+num_lp
             # sigma_v bins
             for j in range(0,num_kin_bins):
                 to_gaussianize_input.append(c_sqrtJ_samps[:,:,j])
@@ -258,7 +263,7 @@ def create_static_data_vectors(
     # samples already with fpd dimension
     if num_gaussianized_samps is not None:
         data_vector_dict['fpd_samples'] = gaussian_samps[:,:,0:num_td]
-        data_vector_dict['gamma_pred_samples'] = gaussian_samps[:,:,gamma_idx]
+        data_vector_dict['lens_param_samples'] = gaussian_samps[:,:,num_td:(num_td+num_lp)]
         data_vector_dict['kappa_ext_samples'] = kappa_ext_samps
 
         if kinematic_type is not None:
@@ -279,15 +284,25 @@ def create_static_data_vectors(
     
     # gamma_lens interim modeling prior
     # if no modeling prior specified, assumes uniform
-    if log_prob_gamma_nu_int is None:
-        data_vector_dict['log_prob_gamma_samps_nu_int'] = uniform.logpdf(
-            data_vector_dict['gamma_pred_samples'],loc=1.,scale=2.)
+    # TODO: switch to over all lens params
+    if lens_params_nu_int_means is None:
+        raise ValueError("Must provide modeling prior (nu_int) over lens parameters")
     else:
-        data_vector_dict['log_prob_gamma_samps_nu_int'] = np.empty(
-            (data_vector_dict['gamma_pred_samples'].shape))
+        # save info to data_vector_dict for later use
+        data_vector_dict['lens_params_nu_int_means'] = lens_params_nu_int_means
+        data_vector_dict['lens_params_nu_int_stddevs'] = lens_params_nu_int_stddevs
+        # construct multivariate normal
+        log_prob_lens_params_nu_int = multivariate_normal(
+            mean=lens_params_nu_int_means,
+            cov=np.diag(lens_params_nu_int_stddevs**2)).logpdf
+        # log prob condenses over lens params dimension
+        data_vector_dict['log_prob_lens_param_samps_nu_int'] = np.empty(
+            (data_vector_dict['lens_param_samples'].shape[0:2]))
         for i in range(0,num_lenses):
-            data_vector_dict['log_prob_gamma_samps_nu_int'][i] = log_prob_gamma_nu_int(
-                data_vector_dict['gamma_pred_samples'][i])
+            # TODO: will this work with a multivariate log_prob function? this still doesn't have 
+            # a condensed sample dimension?
+            data_vector_dict['log_prob_lens_param_samps_nu_int'][i] = log_prob_lens_params_nu_int(
+                data_vector_dict['lens_param_samples'][i])
             
 
     # kinematics if requested
