@@ -59,11 +59,13 @@ for dv_dict in data_vector_dict_list:
         lklhd_obj = tdc_sampler.TDCKinLikelihood(
             fpd_sample_shape, kin_pred_samples_shape,
             cosmo_model=config_module.COSMO_MODEL,
-            use_astropy=USE_ASTROPY)
+            use_astropy=USE_ASTROPY,
+            use_gamma_info=config_module.HI_REWEIGHTING)
     else:
         lklhd_obj = tdc_sampler.TDCLikelihood(fpd_sample_shape,
             cosmo_model=config_module.COSMO_MODEL,
-            use_astropy=USE_ASTROPY)
+            use_astropy=USE_ASTROPY,
+            use_gamma_info=config_module.HI_REWEIGHTING)
 
     likelihood_obj_list.append(lklhd_obj)
 

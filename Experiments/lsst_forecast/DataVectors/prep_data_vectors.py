@@ -22,6 +22,15 @@ def retrieve_truth_fpd(metadata_df,num_td):
 
     return fpd_truth
 
+def retrieve_truth_lp(metadata_df):
+
+    return metadata_df.loc[:,['main_deflector_parameters_theta_E',
+    'main_deflector_parameters_gamma1',
+    'main_deflector_parameters_gamma2','main_deflector_parameters_gamma',
+    'main_deflector_parameters_e1','main_deflector_parameters_e2',
+    'main_deflector_parameters_center_x','main_deflector_parameters_center_y',
+    'source_parameters_center_x','source_parameters_center_y']].to_numpy()
+
 
 def retrieve_truth_td(metadata_df,num_td):
     if num_td == 1: 
@@ -126,7 +135,8 @@ def create_static_data_vectors(
     num_gaussianized_samps=None,
     lens_params_nu_int_means=None,
     lens_params_nu_int_stddevs=None,
-    log_prob_beta_ani_nu_int=None):
+    log_prob_beta_ani_nu_int=None,
+    debias_models=False):
     """
     Args:
         posteriors_h5_file ()
@@ -160,6 +170,9 @@ def create_static_data_vectors(
             }
         
     """
+
+    if debias_models and kinematic_type is not None:
+        raise ValueError('de-biasing only works in TD-only case (for now)')
 
     # load in from posteriors file
     with h5py.File(posteriors_h5_file, "r") as h5:
@@ -227,6 +240,7 @@ def create_static_data_vectors(
         for i in range(0,num_td):
             to_gaussianize_input.append(fpd_samps[:,:,i])
         # TODO: all lens params
+        lp_truth = retrieve_truth_lp(metadata_df)
         for lp in range(0,num_lp):
             to_gaussianize_input.append(lens_param_samps[:,:,lp])
 
@@ -246,8 +260,12 @@ def create_static_data_vectors(
         gaussian_samps = np.empty((num_lenses,
             num_gaussianized_samps,np.shape(input_samps)[-1]))
         for l_idx in range(0,num_lenses):
+            tdonly_truth = None
+            if debias_models:
+                tdonly_truth = np.concatenate((fpd_truth[l_idx],lp_truth[l_idx]))
             gaussian_samps[l_idx] = gaussianize_samples(
-                input_samps[l_idx],num_gaussianized_samps)
+                input_samps[l_idx],num_gaussianized_samps,
+                gt_for_debiasing=tdonly_truth)
 
 
     # TODO: get this into format for likelihood ... (add repeated axes, etc.)
@@ -267,9 +285,7 @@ def create_static_data_vectors(
         data_vector_dict['kappa_ext_samples'] = kappa_ext_samps
 
         if kinematic_type is not None:
-            if cosmo_model in ['LCDM_lambda_int_beta_ani',
-                'w0waCDM_lambda_int_beta_ani','w0waCDM_fullcPDF']:
-                data_vector_dict['beta_ani_samples'] = gaussian_samps[:,:,beta_idx]
+            data_vector_dict['beta_ani_samples'] = gaussian_samps[:,:,beta_idx]
             data_vector_dict['kin_pred_samples'] = gaussian_samps[:,:,-num_kin_bins:]
     else:
         raise ValueError("not implemented")

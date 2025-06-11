@@ -207,7 +207,7 @@ class TDCLikelihood():
             sigma_lint = hyperparameters[-5]
 
         elif self.cosmo_model == 'w0waCDM_fullcPDF':
-            # NOTE: hardcoding of hyperparameter order!! (-6 is mu, -5 is sigma)
+            # NOTE: hardcoding of hyperparameter order!! (4 is mu, 5 is sigma)
             mu_lint = hyperparameters[4]
             sigma_lint = hyperparameters[5]
 
