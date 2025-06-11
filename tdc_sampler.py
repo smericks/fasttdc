@@ -53,7 +53,7 @@ class TDCLikelihood():
         if cosmo_model not in ['LCDM', 'LCDM_lambda_int',
                                'LCDM_lambda_int_beta_ani', 'w0waCDM', 
                                'w0waCDM_lambda_int_beta_ani',
-                               'w0waCDM_fullcPDF']:
+                               'w0waCDM_fullcPDF','w0waCDM_fullcPDF_noKIN']:
             raise ValueError("choose from available cosmo_models: " +
                              "LCDM, LCDM_lambda_int, LCDM_lambda_int_beta_ani, w0waCDM, " +
                              "w0waCDM_lambda_int_beta_ani, w0waCDM_fullcPDF")
@@ -156,7 +156,7 @@ class TDCLikelihood():
             w0_input = -1.
             wa_input = 0.
         elif self.cosmo_model in ['w0waCDM', 'w0waCDM_lambda_int_beta_ani',
-                                  'w0waCDM_fullcPDF']:
+                                  'w0waCDM_fullcPDF','w0waCDM_fullcPDF_noKIN']:
             w0_input = hyperparameters[2]
             wa_input = hyperparameters[3]
 
@@ -287,6 +287,24 @@ class TDCLikelihood():
             nu_means[5] = 0.
             nu_stddevs[4] = hyperparameters[13]
             nu_stddevs[5] = hyperparameters[13]
+
+        elif self.cosmo_model == 'w0waCDM_fullcPDF_noKIN': 
+            # theta_E
+            nu_means[0] = hyperparameters[6]
+            nu_stddevs[0] = hyperparameters[7]
+            # external shear (gamma1,gamma2)
+            nu_means[1] = 0.
+            nu_means[2] = 0.
+            nu_stddevs[1] = hyperparameters[8]
+            nu_stddevs[2] = hyperparameters[8]
+            # gamma_lens
+            nu_means[3] = hyperparameters[4]
+            nu_stddevs[3] = hyperparameters[5]
+            # ellipticity (e1,e2) 
+            nu_means[4] = 0.
+            nu_means[5] = 0.
+            nu_stddevs[4] = hyperparameters[9]
+            nu_stddevs[5] = hyperparameters[9]
 
         else: # all other models
             # only change gamma_lens
@@ -756,6 +774,39 @@ def w0waCDM_fullcPDF_log_prior(hyperparameters):
     
     return 0
 
+def w0waCDM_fullcPDF_noKIN_log_prior(hyperparameters):
+    """
+    Args:
+        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
+            mu_gamma,sigma_gamma])
+    """
+
+    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+        return -np.inf
+    elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+        return -np.inf
+    #w0 [-2,0]
+    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
+        return -np.inf
+    #wa [-2,2]
+    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
+        return -np.inf
+    # LENS PARAMS
+    elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5: #mu(gamma_lens)
+        return -np.inf
+    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(gamma_lens)
+        return -np.inf
+    elif hyperparameters[6] < 0.2 or hyperparameters[6] > 2.0: #mu(theta_E)
+        return -np.inf
+    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.7: #sigma(theta_E)
+        return -np.inf
+    elif hyperparameters[8] < 0.001 or hyperparameters[8] > 0.1: #sigma(gamma1/2)
+        return -np.inf
+    elif hyperparameters[9] < 0.001 or hyperparameters[9] > 0.2: #sigma(e1/2)
+        return -np.inf
+    
+    return 0
+
 def generate_initial_state(n_walkers,cosmo_model):
     """
     Args:
@@ -851,6 +902,24 @@ def generate_initial_state(n_walkers,cosmo_model):
         cur_state[:,13] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers) # sigma(e1/2)
 
         return cur_state
+    
+    if cosmo_model == 'w0waCDM_fullcPDF_noKIN':
+        # TODO: try this one with intializing with a compact ball!
+        # order: [H0,Omega_M,w0,wa,mu_lambda_int,sigma_lambda_int,
+        #   mu_beta_ani,sigma_beta_ani,mu_gamma,sigma_gamma]
+        cur_state = np.empty((n_walkers,10))
+        cur_state[:,0] = norm.rvs(loc=70.,scale=5.,size=n_walkers) #h0
+        cur_state[:,1] = truncnorm.rvs(-.3/.1,.2/0.1,loc=0.3,scale=0.1,size=n_walkers) #Omega_M
+        cur_state[:,2] = truncnorm.rvs(-1/.2,1/.2,loc=-1.,scale=0.2,size=n_walkers) #w0
+        cur_state[:,3] = truncnorm.rvs(-1/.2,1/.2,loc=0.,scale=0.2,size=n_walkers) #wa
+        cur_state[:,4] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=2.,scale=0.1,size=n_walkers) # mu(gamma_lens)
+        cur_state[:,5] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+        cur_state[:,6] = truncnorm.rvs(-3.,3.,loc=0.8,scale=0.2,size=n_walkers) # mu(theta_E)
+        cur_state[:,7] = uniform.rvs(loc=0.01,scale=0.49,size=n_walkers)
+        cur_state[:,8] = uniform.rvs(loc=0.01,scale=0.09,size=n_walkers) # sigma(gamma1/2)
+        cur_state[:,9] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers) # sigma(e1/2)
+
+        return cur_state
 
 
 
@@ -879,6 +948,8 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
         lp = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
     elif cosmo_model == 'w0waCDM_fullcPDF':
         lp = w0waCDM_fullcPDF_log_prior(hyperparameters)
+    elif cosmo_model == 'w0waCDM_fullcPDF_noKIN':
+        lp = w0waCDM_fullcPDF_noKIN_log_prior(hyperparameters)
     # Likelihood
     if lp == 0:
         for i, tdc_likelihood in enumerate(tdc_likelihood_list):
