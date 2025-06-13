@@ -9,30 +9,32 @@ from scipy.stats import norm, multivariate_normal
 RANDOM_SEED = 1
 
 # file locations
-static_dv_file = 'InferenceRuns/exp0_2/TESTstatic_datavectors_seed'+str(RANDOM_SEED)+'.json'
-gold_quads_h5_file = 'DataVectors/gold/quad_posteriors_KIN.h5'
-gold_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_KIN.h5'
+static_dv_file = 'InferenceRuns/exp0_2/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
+gold_quads_h5_file = 'DataVectors/gold/quad_posteriors_DEBIASED.h5'
+gold_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_DEBIASED.h5'
 gold_metadata_file = 'DataVectors/gold/truth_metadata.csv'
-silver_quads_h5_file = 'DataVectors/silver/quad_posteriors_KIN.h5'
-silver_dbls_h5_file = 'DataVectors/silver/dbl_posteriors_KIN.h5'
+silver_quads_h5_file = 'DataVectors/silver/quad_posteriors_DEBIASED.h5'
+silver_dbls_h5_file = 'DataVectors/silver/dbl_posteriors_DEBIASED.h5'
 silver_metadata_file = 'DataVectors/silver/truth_metadata.csv'
 
 NUM_FPD_SAMPS = 5000
 NUM_MCMC_EPOCHS = 1
 NUM_MCMC_WALKERS = 48
-COSMO_MODEL = 'w0waCDM_fullcPDF'
+COSMO_MODEL = 'w0waCDM_lambda_int_beta_ani'
+HI_REWEIGHTING = False
 mu_lp_gold = np.asarray([0.85,0.,0.,2.09,0.,0.,0.,0.,0.,0.]) # hst_norms.csv
 stddev_lp_gold = np.asarray([0.28,0.06,0.06,0.16,0.20,0.20,0.06,0.06,0.34,0.34])
 mu_lp_silver = np.asarray([1.42,0.,0.,2.03,0.,0.,0.,0.,0.,0.])# norms2.csv
 stddev_lp_silver = np.asarray([0.70,0.1,0.1,0.20,0.20,0.20,0.06,0.06,0.37,0.37])
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
-BACKEND_PATH = 'InferenceRuns/exp0_2/TESTw0wa_seed'+str(RANDOM_SEED)+'_backend.h5'
+BACKEND_PATH = 'InferenceRuns/exp0_2/w0wa_seed'+str(RANDOM_SEED)+'_backend.h5'
 RESET_BACKEND=True
 
 # truth information for those indices
 truth_df = pd.read_csv(gold_metadata_file)
 # NOTE: subset to remove bad indices (nans in the doubles silver-quality kinematic samples)
 # remove rows from dataframe that have 'catalog_idx' in bad_dbls
+# TODO scp final kinematics locally and check for bad vals in gold...
 bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669, 877, 1052]
 gold_df = truth_df[~truth_df['catalog_idx'].isin(bad_dbls)].reset_index(drop=True)
 # track catalog_idxs
@@ -132,11 +134,11 @@ fourmost_dbls_catalog_idxs = np.random.choice(catalog_idx_avail,
 # then remove them from the dataframe
 gold_df = gold_df[~gold_df['catalog_idx'].isin(fourmost_dbls_catalog_idxs)].reset_index(drop=True)
 
-# TODO: remove wide posterior silver...
-silver_wider_than_prior_idxs = [  49,  100,  222,  243,  263,  278,  316,  327,  544,  579,  815,
-        942, 1280, 1322, 1545,  117,  132,  151,  257,  317,  582,  765,
-        837,  938,  947,  960, 1092, 1110, 1209, 1428, 1431, 1499, 1503]
-silver_df = gold_df[~gold_df['catalog_idx'].isin(silver_wider_than_prior_idxs)].reset_index(drop=True)
+# NOTE: when evaluating kinematics at each sample, some samples return nan, we exclude those lenses
+silver_nan_kinematic_vals = [ 26,   41,   56,  104,  106,  134,  198,  263, 
+    269,  353,  544,  616,  618,  643, 661,  669,  727,  842,  848, 862,  877,
+    1300, 1322, 1411, 938,  947,  960, 1431 ] 
+silver_df = gold_df[~gold_df['catalog_idx'].isin(silver_nan_kinematic_vals)].reset_index(drop=True)
 
 # SILVER 4MOST
 num_quads = 36
