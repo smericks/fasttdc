@@ -19,7 +19,7 @@ silver_metadata_file = 'DataVectors/silver/truth_metadata.csv'
 
 NUM_FPD_SAMPS = 5000
 NUM_MCMC_EPOCHS = 1
-NUM_MCMC_WALKERS = 48
+NUM_MCMC_WALKERS = 50
 COSMO_MODEL = 'w0waCDM_lambda_int_beta_ani'
 HI_REWEIGHTING = False
 mu_lp_gold = np.asarray([0.85,0.,0.,2.09,0.,0.,0.,0.,0.,0.]) # hst_norms.csv
@@ -38,10 +38,10 @@ with h5py.File(gold_dbls_h5_file,'r') as h5:
 
 # truth information for those indices
 truth_df = pd.read_csv(gold_metadata_file)
-# NOTE: subset to remove bad indices (nans in the doubles silver-quality kinematic samples)
-# remove rows from dataframe that have 'catalog_idx' in bad_dbls
-bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669, 877, 1052]
-gold_df = truth_df[~truth_df['catalog_idx'].isin(bad_dbls)].reset_index(drop=True)
+
+# NOTE: when evaluating kinematics at each sample, some samples return nan, we exclude those lenses
+gold_nan_kin_vals =  []
+gold_df = truth_df[~truth_df['catalog_idx'].isin(gold_nan_kin_vals)].reset_index(drop=True)
 # track catalog_idxs
 gold_df_catalog_idxs = gold_df.loc[:,'catalog_idx'].to_numpy()
 

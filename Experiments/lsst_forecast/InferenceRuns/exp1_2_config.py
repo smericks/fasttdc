@@ -3,48 +3,48 @@
 import h5py
 import pandas as pd
 import numpy as np
-from scipy.stats import norm
+from scipy.stats import norm, multivariate_normal
 
 # random seed
 RANDOM_SEED = 1
 
 # file locations
-static_dv_file = 'InferenceRuns/exp1_2/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
-gold_quads_h5_file = 'DataVectors/gold/quad_posteriors_KIN.h5'
-gold_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_KIN.h5'
+static_dv_file = 'InferenceRuns/exp0_2/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
+gold_quads_h5_file = 'DataVectors/gold/quad_posteriors_DEBIASED.h5'
+gold_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_DEBIASED.h5'
 gold_metadata_file = 'DataVectors/gold/truth_metadata.csv'
+silver_quads_h5_file = 'DataVectors/silver/quad_posteriors_DEBIASED.h5'
+silver_dbls_h5_file = 'DataVectors/silver/dbl_posteriors_DEBIASED.h5'
+silver_metadata_file = 'DataVectors/silver/truth_metadata.csv'
 
 NUM_FPD_SAMPS = 5000
-NUM_MCMC_EPOCHS = 1000
-NUM_MCMC_WALKERS = 70
-COSMO_MODEL = 'w0waCDM_fullcPDF'
-# NOTE: use norms.csv to read off modeling prior for each model
-mu_lp_gold = [0.85,0.,0.,2.09,0.,0.,0.,0.,0.,0.] # hst_norms.csv
-stddev_lp_gold = [0.28,0.06,0.06,0.16,0.20,0.20,0.06,0.06,0.34,0.34]
-mu_lp_silver = [1.42,0.,0.,2.03,0.,0.,0.,0.,0.,0.]# norms2.csv
-stddev_lp_silver = [0.70,0.1,0.1,0.20,0.20,0.20,0.06,0.06,0.37,0.37]
+NUM_MCMC_EPOCHS = 1
+NUM_MCMC_WALKERS = 50
+COSMO_MODEL = 'w0waCDM_lambda_int_beta_ani'
+HI_REWEIGHTING = False
+mu_lp_gold = np.asarray([0.85,0.,0.,2.09,0.,0.,0.,0.,0.,0.]) # hst_norms.csv
+stddev_lp_gold = np.asarray([0.28,0.06,0.06,0.16,0.20,0.20,0.06,0.06,0.34,0.34])
+mu_lp_silver = np.asarray([1.42,0.,0.,2.03,0.,0.,0.,0.,0.,0.])# norms2.csv
+stddev_lp_silver = np.asarray([0.70,0.1,0.1,0.20,0.20,0.20,0.06,0.06,0.37,0.37])
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
-BACKEND_PATH = 'InferenceRuns/exp1_2/lcdm_seed'+str(RANDOM_SEED)+'_backend.h5'
+BACKEND_PATH = 'InferenceRuns/exp0_2/w0wa_seed'+str(RANDOM_SEED)+'_backend.h5'
 RESET_BACKEND=True
-
-# catalog indices available
-with h5py.File(gold_quads_h5_file,'r') as h5:
-    quad_catalog_idxs = h5['catalog_idxs'][:]
-with h5py.File(gold_dbls_h5_file,'r') as h5:
-    dbl_catalog_idxs = h5['catalog_idxs'][:]
 
 # truth information for those indices
 truth_df = pd.read_csv(gold_metadata_file)
-# NOTE: subset to remove bad indices (nans in the doubles silver-quality kinematic samples)
-# remove rows from dataframe that have 'catalog_idx' in bad_dbls
-bad_dbls =  [106, 134, 158 ,233 ,263 ,269 ,353, 446, 579 ,618 ,669, 877, 1052]
-gold_df = truth_df[~truth_df['catalog_idx'].isin(bad_dbls)].reset_index(drop=True)
+
+# NOTE: when evaluating kinematics at each sample, some samples return nan, we exclude those lenses
+gold_nan_kin_vals =  []
+gold_df = truth_df[~truth_df['catalog_idx'].isin(gold_nan_kin_vals)].reset_index(drop=True)
 # track catalog_idxs
 gold_df_catalog_idxs = gold_df.loc[:,'catalog_idx'].to_numpy()
 
 #########################
 # Human selection cuts!!
 #########################
+
+# use the random seed
+np.random.seed(RANDOM_SEED)
 
 # GOLD NIRSPEC
 num_quads = 10
@@ -225,5 +225,6 @@ likelihood_configs = {
         'lens_params_nu_int_means':mu_lp_gold,
         'lens_params_nu_int_stddevs':stddev_lp_gold,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
-    },
+    }
+
 }

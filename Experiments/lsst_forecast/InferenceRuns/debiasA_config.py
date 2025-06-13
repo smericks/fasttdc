@@ -19,8 +19,8 @@ silver_metadata_file = 'DataVectors/silver/truth_metadata.csv'
 
 NUM_FPD_SAMPS = 5000
 NUM_MCMC_EPOCHS = 1
-NUM_MCMC_WALKERS = 48
-COSMO_MODEL = 'w0waCDM_fullcPDF'
+NUM_MCMC_WALKERS = 50
+COSMO_MODEL = 'w0waCDM_fullcPDF_noKIN'
 HI_REWEIGHTING = True
 mu_lp_gold = np.asarray([0.85,0.,0.,2.09,0.,0.,0.,0.,0.,0.]) # hst_norms.csv
 stddev_lp_gold = np.asarray([0.28,0.06,0.06,0.16,0.20,0.20,0.06,0.06,0.34,0.34])
