@@ -213,7 +213,8 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
+        'lens_params_nu_int_means':mu_lp_gold,
+        'lens_params_nu_int_stddevs':stddev_lp_gold,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -230,7 +231,8 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
+        'lens_params_nu_int_means':mu_lp_gold,
+        'lens_params_nu_int_stddevs':stddev_lp_gold,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -246,7 +248,8 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
+        'lens_params_nu_int_means':mu_lp_gold,
+        'lens_params_nu_int_stddevs':stddev_lp_gold,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -265,7 +268,8 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
+        'lens_params_nu_int_means':mu_lp_gold,
+        'lens_params_nu_int_stddevs':stddev_lp_gold,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -281,7 +285,8 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
+        'lens_params_nu_int_means':mu_lp_gold,
+        'lens_params_nu_int_stddevs':stddev_lp_gold,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -298,7 +303,8 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
+        'lens_params_nu_int_means':mu_lp_gold,
+        'lens_params_nu_int_stddevs':stddev_lp_gold,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -314,7 +320,8 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'log_prob_gamma_nu_int':GOLD_GAMMA_LENS_PRIOR,
+        'lens_params_nu_int_means':mu_lp_gold,
+        'lens_params_nu_int_stddevs':stddev_lp_gold,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 

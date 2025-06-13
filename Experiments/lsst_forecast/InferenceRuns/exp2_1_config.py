@@ -260,7 +260,7 @@ likelihood_configs = {
     'muse_quads':{
         'posteriors_h5_file':gold_quads_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':np.concatenate(muse_quads_catalog_idxs,muse_quads_exp21_catalog_idxs),
+        'catalog_idxs':np.concatenate((muse_quads_catalog_idxs,muse_quads_exp21_catalog_idxs)),
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':0.03,
         'td_meas_error_days':None,
@@ -277,7 +277,7 @@ likelihood_configs = {
     'muse_dbls':{
         'posteriors_h5_file':gold_dbls_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':np.concatenate(muse_dbls_catalog_idxs,muse_dbls_exp21_catalog_idxs),
+        'catalog_idxs':np.concatenate((muse_dbls_catalog_idxs,muse_dbls_exp21_catalog_idxs)),
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':0.03,
         'td_meas_error_days':None,
