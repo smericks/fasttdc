@@ -6,7 +6,7 @@ import numpy as np
 from scipy.stats import norm, multivariate_normal
 
 # random seed
-RANDOM_SEED = 0
+RANDOM_SEED = 1
 
 # file locations
 static_dv_file = 'InferenceRuns/exp0_2/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
