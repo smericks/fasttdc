@@ -9,16 +9,26 @@ from scipy.stats import norm, multivariate_normal
 RANDOM_SEED = 1
 
 # file locations
-static_dv_file = 'InferenceRuns/exp0_2/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
-gold_quads_h5_file = 'DataVectors/gold/quad_posteriors_DEBIASED.h5'
-gold_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_DEBIASED.h5'
+static_dv_file = 'InferenceRuns/exp1_2/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
+
+# 4 modeling options...locations of samples from joint fermat/csqrt(J) posteriors
+JWST_quads_h5_file = 'DataVectors/gold/quad_posteriors_JWST_DEBIASED.h5'
+JWST_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_JWST_DEBIASED.h5'
+
+HST_FM_quads_h5_file = 'DataVectors/gold/quad_posteriors_TDCOSMO25_DEBIASED.h5'
+HST_FM_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_TDCOSMO25_DEBIASED.h5'
+
+HST_NPE_quads_h5_file = 'DataVectors/gold/quad_posteriors_DEBIASED.h5'
+HST_NPE_dbls_h5_file = 'DataVectors/gold/dbl_posteriors_DEBIASED.h5'
+
+LSST_NPE_quads_h5_file = 'DataVectors/silver/quad_posteriors_DEBIASED.h5'
+LSST_NPE_dbls_h5_file = 'DataVectors/silver/dbl_posteriors_DEBIASED.h5'
+
 gold_metadata_file = 'DataVectors/gold/truth_metadata.csv'
-silver_quads_h5_file = 'DataVectors/silver/quad_posteriors_DEBIASED.h5'
-silver_dbls_h5_file = 'DataVectors/silver/dbl_posteriors_DEBIASED.h5'
 silver_metadata_file = 'DataVectors/silver/truth_metadata.csv'
 
 NUM_FPD_SAMPS = 5000
-NUM_MCMC_EPOCHS = 1
+NUM_MCMC_EPOCHS = 50000
 NUM_MCMC_WALKERS = 50
 COSMO_MODEL = 'w0waCDM_lambda_int_beta_ani'
 HI_REWEIGHTING = False
@@ -27,15 +37,11 @@ stddev_lp_gold = np.asarray([0.28,0.06,0.06,0.16,0.20,0.20,0.06,0.06,0.34,0.34])
 mu_lp_silver = np.asarray([1.42,0.,0.,2.03,0.,0.,0.,0.,0.,0.])# norms2.csv
 stddev_lp_silver = np.asarray([0.70,0.1,0.1,0.20,0.20,0.20,0.06,0.06,0.37,0.37])
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
-BACKEND_PATH = 'InferenceRuns/exp0_2/w0wa_seed'+str(RANDOM_SEED)+'_backend.h5'
+BACKEND_PATH = 'InferenceRuns/exp1_2/w0wa_seed'+str(RANDOM_SEED)+'_backend.h5'
 RESET_BACKEND=True
 
 # truth information for those indices
-truth_df = pd.read_csv(gold_metadata_file)
-
-# NOTE: when evaluating kinematics at each sample, some samples return nan, we exclude those lenses
-gold_nan_kin_vals =  []
-gold_df = truth_df[~truth_df['catalog_idx'].isin(gold_nan_kin_vals)].reset_index(drop=True)
+gold_df = pd.read_csv(gold_metadata_file)
 # track catalog_idxs
 gold_df_catalog_idxs = gold_df.loc[:,'catalog_idx'].to_numpy()
 
@@ -53,7 +59,6 @@ nirspec_quads_avail = np.where(
     ((np.abs(gold_df['td01'].to_numpy()) > 30.) | 
      (np.abs(gold_df['td02'].to_numpy()) > 30.) | 
      (np.abs(gold_df['td03'].to_numpy()) > 30.)) &
-    #(truth_df['lens_light_parameters_mag_app'].to_numpy() > 22.) &
     (gold_df['lens_light_parameters_mag_app'].to_numpy() < 24.) &
     (gold_df['source_parameters_mag_app'].to_numpy() < 24.)
 )[0]
@@ -141,7 +146,7 @@ likelihood_configs = {
 
     # NIRSPEC likelihoods (10 lenses)
     'nirspec_quads':{
-        'posteriors_h5_file':gold_quads_h5_file,
+        'posteriors_h5_file':JWST_quads_h5_file,
         'metadata_file':gold_metadata_file,
         'catalog_idxs':nirspec_quads_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
@@ -159,7 +164,7 @@ likelihood_configs = {
 
     # MUSE likelihoods (40 lenses)
     'muse_quads':{
-        'posteriors_h5_file':gold_quads_h5_file,
+        'posteriors_h5_file':HST_FM_quads_h5_file,
         'metadata_file':gold_metadata_file,
         'catalog_idxs':muse_quads_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
@@ -176,7 +181,7 @@ likelihood_configs = {
     },
 
     'muse_dbls':{
-        'posteriors_h5_file':gold_dbls_h5_file,
+        'posteriors_h5_file':HST_FM_dbls_h5_file,
         'metadata_file':gold_metadata_file,
         'catalog_idxs':muse_dbls_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
@@ -194,7 +199,7 @@ likelihood_configs = {
 
     # 4MOST likelihoods (150 lenses)
     '4MOST_quads':{
-        'posteriors_h5_file':gold_quads_h5_file,
+        'posteriors_h5_file':HST_NPE_quads_h5_file,
         'metadata_file':gold_metadata_file,
         'catalog_idxs':fourmost_quads_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
@@ -211,7 +216,7 @@ likelihood_configs = {
     },
 
     '4MOST_dbls':{
-        'posteriors_h5_file':gold_dbls_h5_file,
+        'posteriors_h5_file':HST_NPE_dbls_h5_file,
         'metadata_file':gold_metadata_file,
         'catalog_idxs':fourmost_dbls_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
