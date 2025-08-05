@@ -10,7 +10,7 @@ from scipy.stats import norm, multivariate_normal
 RANDOM_SEED = 1
 
 # file locations
-static_dv_file = 'InferenceRuns/exp1_4/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
+static_dv_file = 'InferenceRuns/exp1_5/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
 
 # 4 modeling options...locations of samples from joint fermat/csqrt(J) posteriors
 JWST_quads_h5_file = 'DataVectors/gold/quad_posteriors_JWST_DEBIASED.h5'
@@ -38,7 +38,7 @@ stddev_lp_gold = np.asarray([0.28,0.06,0.06,0.16,0.20,0.20,0.06,0.06,0.34,0.34])
 mu_lp_silver = np.asarray([1.42,0.,0.,2.03,0.,0.,0.,0.,0.,0.])# norms2.csv
 stddev_lp_silver = np.asarray([0.70,0.1,0.1,0.20,0.20,0.20,0.06,0.06,0.37,0.37])
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
-BACKEND_PATH = 'InferenceRuns/exp1_4/w0wa_seed'+str(RANDOM_SEED)+'_backend.h5'
+BACKEND_PATH = 'InferenceRuns/exp1_5/w0wa_seed'+str(RANDOM_SEED)+'_backend.h5'
 RESET_BACKEND=True
 
 # truth information for those indices
@@ -138,7 +138,7 @@ likelihood_configs = {
 
     # MUSE likelihoods (40 lenses)
     'muse_quads':{
-        'posteriors_h5_file':JWST_quads_h5_file,
+        'posteriors_h5_file':HST_NPE_quads_h5_file,
         'metadata_file':gold_metadata_file,
         'catalog_idxs':muse_quads_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
@@ -155,7 +155,7 @@ likelihood_configs = {
     },
 
     'muse_dbls':{
-        'posteriors_h5_file':JWST_dbls_h5_file,
+        'posteriors_h5_file':HST_NPE_dbls_h5_file,
         'metadata_file':gold_metadata_file,
         'catalog_idxs':muse_dbls_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
