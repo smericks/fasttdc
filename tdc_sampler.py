@@ -674,38 +674,32 @@ def w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
     
     return 0
 
+def OmegaM_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
+    """Include approximation of Pantheon+ Prior used in TDCOSMO 2025 (https://arxiv.org/pdf/2506.03023)
+        Note page 17: "Pantheon+ effectively provided a prior on Ωm (i.e., Ωm = 0.334 ± 0.018)"
+    """
+
+    # returns 0 or -np.inf
+    within_bounds = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+
+    if within_bounds == 0:   
+        # note we center our ground truth at 0.3     
+        return norm.logpdf(hyperparameters[1],loc=0.3,scale=0.018)
+
+    else:
+        return within_bounds
+        
+
 def INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
 
     # returns 0 or -np.inf
     within_bounds = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
 
     if within_bounds == 0:
-        """
-        HARCODED_COV = [[ 3.44223963e+00, -4.11838162e-02, -2.41929684e-01,
-            6.79514752e-01,  1.21649708e-02,  1.41206148e-03,
-            -1.62017974e-03,  1.25331307e-04],
-        [-4.11838162e-02,  7.86808826e-03, -9.04086446e-03,
-            -3.23963110e-02, -1.12975063e-03,  4.37048533e-05,
-            1.19877612e-04,  4.91279229e-05],
-        [-2.41929684e-01, -9.04086446e-03,  4.77945452e-02,
-            -6.15320898e-02,  1.89141384e-03, -1.62559966e-04,
-            -4.46466403e-04, -2.48102582e-04],
-        [ 6.79514752e-01, -3.23963110e-02, -6.15320898e-02,
-            5.57771936e-01,  5.72993589e-04, -2.47347909e-05,
-            -1.33506956e-05,  1.97205440e-04],
-        [ 1.21649708e-02, -1.12975063e-03,  1.89141384e-03,
-            5.72993589e-04,  3.81515870e-04, -2.60852078e-06,
-            -5.07138565e-05, -2.90699248e-05],
-        [ 1.41206148e-03,  4.37048533e-05, -1.62559966e-04,
-            -2.47347909e-05, -2.60852078e-06,  5.86037706e-05,
-            -1.60569404e-05,  2.57434106e-06],
-        [-1.62017974e-03,  1.19877612e-04, -4.46466403e-04,
-            -1.33506956e-05, -5.07138565e-05, -1.60569404e-05,
-            3.49452453e-04,  1.17920808e-04],
-        [ 1.25331307e-04,  4.91279229e-05, -2.48102582e-04,
-            1.97205440e-04, -2.90699248e-05,  2.57434106e-06,
-            1.17920808e-04,  2.08479045e-04]]
-        """
+        # this cov matrix is hardcoded, taken from a gold-only chain
+        # we only evaluate on the last 4 params, so this is only a prior
+        # on lambda_int and beta_ani...
+        # (This is only used for a redshift configuration test...)
         HARCODED_COV = np.asarray([[ 6.12374896e+00, -2.15141853e-02, -5.71087181e-01,
             6.32316635e-01,  6.94284277e-03,  2.95354324e-06,
             -1.26510967e-02,  1.61769785e-03],
@@ -815,7 +809,6 @@ def w0waCDM_fullcPDF_noKIN_log_prior(hyperparameters):
         return -np.inf
     
     return 0
-
 
 
 def dynesty_prior_transform(uniform_draw):
@@ -969,7 +962,7 @@ def log_likelihood(hyperparameters,tdc_likelihood_list):
     return fll
 
 def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
-    use_informative=False):
+    use_informative=False,use_OmegaM=False):
     """
     Args:
         hyperparameters ([float]): 
@@ -993,6 +986,8 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
     elif cosmo_model == 'w0waCDM_lambda_int_beta_ani':
         if use_informative:
             lp = INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+        elif use_OmegaM:
+            lp = OmegaM_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
         else:
             lp = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
     elif cosmo_model == 'w0waCDM_fullcPDF':
@@ -1008,7 +1003,7 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
 
 def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     n_walkers=20, use_mpi=False, use_multiprocess=False, backend_path=None, 
-    reset_backend=True,sampler_type='emcee',use_informative=False):
+    reset_backend=True,sampler_type='emcee',use_informative=False,use_OmegaM=False):
     """
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
@@ -1019,6 +1014,7 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
         backend_path (string): If not None, saves a backend .h5 file. 
             Otherwise, returns the chain.
         sampler_type (string): 'emcee' or 'dynesty'
+        use_informative, use_OmegaM: Boolean flags, control the use of informative priors...
         
     Returns: 
         mcmc chain (emcee.EnsemblerSampler.chain or dynesty.NestedSampler.)
@@ -1040,7 +1036,8 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     data_vector_global = data_vector_list
 
     log_posterior_fn = partial(log_posterior, cosmo_model=cosmo_model,
-        tdc_likelihood_list=tdc_likelihood_list,use_informative=use_informative)
+        tdc_likelihood_list=tdc_likelihood_list,use_informative=use_informative,
+        use_OmegaM=use_OmegaM)
     # need this fnc for dynesty
     log_likelihood_fn = partial(log_likelihood,
         tdc_likelihood_list=tdc_likelihood_list)
