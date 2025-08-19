@@ -77,7 +77,8 @@ tenIFU_chain = tdc_sampler.fast_TDC(likelihood_obj_list,data_vector_dict_list,
     n_walkers=config_module.NUM_MCMC_WALKERS,
     use_mpi=use_MPI, use_multiprocess=use_multiprocess,
     backend_path=config_module.BACKEND_PATH,
-    reset_backend=config_module.RESET_BACKEND)
+    reset_backend=config_module.RESET_BACKEND,
+    use_OmegaM=config_module.OMEGA_M_PRIOR)
 end = time.time()
 print('Time to run MCMC:',end-start)
 
