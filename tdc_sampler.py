@@ -263,57 +263,127 @@ class TDCLikelihood():
         nu_means = data_vector_global[index_likelihood_list]['lens_params_nu_int_means']
         nu_stddevs = data_vector_global[index_likelihood_list]['lens_params_nu_int_stddevs']
 
-        # modify into proposed hypermodel
-        if self.cosmo_model == 'w0waCDM_fullcPDF':
-            # theta_E
-            nu_means[0] = hyperparameters[10]
-            nu_stddevs[0] = hyperparameters[11]
-            # external shear (gamma1,gamma2)
-            nu_means[1] = 0.
-            nu_means[2] = 0.
-            nu_stddevs[1] = hyperparameters[12]
-            nu_stddevs[2] = hyperparameters[12]
-            # gamma_lens
-            nu_means[3] = hyperparameters[8]
-            nu_stddevs[3] = hyperparameters[9]
-            # ellipticity (e1,e2) 
-            nu_means[4] = 0.
-            nu_means[5] = 0.
-            nu_stddevs[4] = hyperparameters[13]
-            nu_stddevs[5] = hyperparameters[13]
+        if nu_means is not None:
 
-        elif self.cosmo_model == 'w0waCDM_fullcPDF_noKIN': 
-            # theta_E
-            nu_means[0] = hyperparameters[6]
-            nu_stddevs[0] = hyperparameters[7]
-            # external shear (gamma1,gamma2)
-            nu_means[1] = 0.
-            nu_means[2] = 0.
-            nu_stddevs[1] = hyperparameters[8]
-            nu_stddevs[2] = hyperparameters[8]
-            # gamma_lens
-            nu_means[3] = hyperparameters[4]
-            nu_stddevs[3] = hyperparameters[5]
-            # ellipticity (e1,e2) 
-            nu_means[4] = 0.
-            nu_means[5] = 0.
-            nu_stddevs[4] = hyperparameters[9]
-            nu_stddevs[5] = hyperparameters[9]
+            # modify into proposed hypermodel
+            if self.cosmo_model == 'w0waCDM_fullcPDF':
+                # theta_E
+                nu_means[0] = hyperparameters[10]
+                nu_stddevs[0] = hyperparameters[11]
+                # external shear (gamma1,gamma2)
+                nu_means[1] = 0.
+                nu_means[2] = 0.
+                nu_stddevs[1] = hyperparameters[12]
+                nu_stddevs[2] = hyperparameters[12]
+                # gamma_lens
+                nu_means[3] = hyperparameters[8]
+                nu_stddevs[3] = hyperparameters[9]
+                # ellipticity (e1,e2) 
+                nu_means[4] = 0.
+                nu_means[5] = 0.
+                nu_stddevs[4] = hyperparameters[13]
+                nu_stddevs[5] = hyperparameters[13]
 
-        else: # all other models
-            # only change gamma_lens
-            nu_means[3] = hyperparameters[-2]
-            nu_stddevs[3] = hyperparameters[-1]
+            elif self.cosmo_model == 'w0waCDM_fullcPDF_noKIN': 
+                # theta_E
+                nu_means[0] = hyperparameters[6]
+                nu_stddevs[0] = hyperparameters[7]
+                # external shear (gamma1,gamma2)
+                nu_means[1] = 0.
+                nu_means[2] = 0.
+                nu_stddevs[1] = hyperparameters[8]
+                nu_stddevs[2] = hyperparameters[8]
+                # gamma_lens
+                nu_means[3] = hyperparameters[4]
+                nu_stddevs[3] = hyperparameters[5]
+                # ellipticity (e1,e2) 
+                nu_means[4] = 0.
+                nu_means[5] = 0.
+                nu_stddevs[4] = hyperparameters[9]
+                nu_stddevs[5] = hyperparameters[9]
 
-        # TODO: check if this returns the right dimensional thing
-        eval_at_proposed_nu = multivariate_normal.logpdf(
-            data_vector_global[index_likelihood_list]['lens_param_samples'],
-            mean=nu_means,
-            cov=np.diag(nu_stddevs**2))
+            else: # all other models
+                # only change gamma_lens
+                nu_means[3] = hyperparameters[-2]
+                nu_stddevs[3] = hyperparameters[-1]
 
-        rw_factor = (eval_at_proposed_nu - 
-            data_vector_global[index_likelihood_list]['log_prob_lens_param_samps_nu_int'])
-        
+            # TODO: check if this returns the right dimensional thing
+            eval_at_proposed_nu = multivariate_normal.logpdf(
+                data_vector_global[index_likelihood_list]['lens_param_samples'],
+                mean=nu_means,
+                cov=np.diag(nu_stddevs**2))
+
+            rw_factor = (eval_at_proposed_nu - 
+                data_vector_global[index_likelihood_list]['log_prob_lens_param_samps_nu_int'])
+            
+        else: 
+            # uniform interim prior!!
+
+            # modify into proposed hypermodel
+            if self.cosmo_model == 'w0waCDM_fullcPDF':
+                nu_means = np.empty(6)
+                nu_stddevs = np.empty(6)
+
+                # theta_E
+                nu_means[0] = hyperparameters[10]
+                nu_stddevs[0] = hyperparameters[11]
+                # external shear (gamma1,gamma2)
+                nu_means[1] = 0.
+                nu_means[2] = 0.
+                nu_stddevs[1] = hyperparameters[12]
+                nu_stddevs[2] = hyperparameters[12]
+                # gamma_lens
+                nu_means[3] = hyperparameters[8]
+                nu_stddevs[3] = hyperparameters[9]
+                # ellipticity (e1,e2) 
+                nu_means[4] = 0.
+                nu_means[5] = 0.
+                nu_stddevs[4] = hyperparameters[13]
+                nu_stddevs[5] = hyperparameters[13]
+
+                # this is directly the rw_factor, there is no interim prior to subtract off...
+                rw_factor = multivariate_normal.logpdf(
+                    data_vector_global[index_likelihood_list]['lens_param_samples'][:,:,:6],
+                    mean=nu_means,cov=np.diag(nu_stddevs**2))
+
+
+            elif self.cosmo_model == 'w0waCDM_fullcPDF_noKIN': 
+                nu_means = np.empty(6)
+                nu_stddevs = np.empty(6)
+    
+                # theta_E
+                nu_means[0] = hyperparameters[6]
+                nu_stddevs[0] = hyperparameters[7]
+                # external shear (gamma1,gamma2)
+                nu_means[1] = 0.
+                nu_means[2] = 0.
+                nu_stddevs[1] = hyperparameters[8]
+                nu_stddevs[2] = hyperparameters[8]
+                # gamma_lens
+                nu_means[3] = hyperparameters[4]
+                nu_stddevs[3] = hyperparameters[5]
+                # ellipticity (e1,e2) 
+                nu_means[4] = 0.
+                nu_means[5] = 0.
+                nu_stddevs[4] = hyperparameters[9]
+                nu_stddevs[5] = hyperparameters[9]
+
+                # this is directly the rw_factor, there is no interim prior to subtract off...
+                rw_factor = multivariate_normal.logpdf(
+                    data_vector_global[index_likelihood_list]['lens_param_samples'][:,:,:6],
+                    mean=nu_means,cov=np.diag(nu_stddevs**2))
+
+            else: # all other models
+                # only change gamma_lens
+                gamma_mean = hyperparameters[-2]
+                gamma_stddev = hyperparameters[-1]
+
+                # this is directly the rw_factor, there is no interim prior to subtract off...
+                rw_factor = norm.logpdf(
+                    data_vector_global[index_likelihood_list]['lens_param_samples'][:,:,3],
+                    loc=gamma_mean,scale=gamma_stddev)
+                
+            
         return rw_factor
 
     @staticmethod
