@@ -65,6 +65,27 @@ def retrieve_truth_kin(metadata_df,kinematic_type):
 
     raise ValueError("kinematic_type not supported")
 
+
+def gaussianize(input_samps,gt_for_debiasing=None):
+    """takes in input samples, fits a Gaussian, and returns Mu,Cov of that 
+        Gaussian
+    Args:
+        input_samps (n_input_samps,n_params)
+        gt_for_debiasing (n_params): Default is None, no de-biasing. We must 
+            have access to ground truth to de-bias.
+    Returns:
+        Mu,Cov
+    """
+    Mu = np.mean(input_samps,axis=0)
+    Cov = np.cov(input_samps,rowvar=False)
+
+    # de-bias if requested
+    if gt_for_debiasing is not None:
+        Mu = multivariate_normal.rvs(mean=gt_for_debiasing,cov=Cov)
+
+    return Mu,Cov
+
+
 def gaussianize_samples(input_samps,num_gaussian_samps=5000,
     gt_for_debiasing=None):
     """takes in input samples, fits a Gaussian, and returns new samples
@@ -77,12 +98,7 @@ def gaussianize_samples(input_samps,num_gaussian_samps=5000,
         output_samps (n_gaussian_samps,n_params)
     """
 
-    Mu = np.mean(input_samps,axis=0)
-    Cov = np.cov(input_samps,rowvar=False)
-
-    # de-bias if requested
-    if gt_for_debiasing is not None:
-        Mu = multivariate_normal.rvs(mean=gt_for_debiasing,cov=Cov)
+    Mu,Cov = gaussianize(input_samps,gt_for_debiasing)
 
     gaussianized_samps = multivariate_normal.rvs(mean=Mu,cov=Cov,
         size=num_gaussian_samps)
@@ -298,16 +314,19 @@ def create_static_data_vectors(
         num_fpd_samps, axis=1)
     data_vector_dict['td_likelihood_prefactors'] = np.log( (1/(2*np.pi)**(num_td/2)) / 
         np.sqrt(np.linalg.det(np.linalg.inv(data_vector_dict['td_likelihood_prec']))) )
-    
-    # gamma_lens interim modeling prior
-    # if no modeling prior specified, assumes uniform
-    # TODO: switch to over all lens params
-    if lens_params_nu_int_means is None:
-        raise ValueError("Must provide modeling prior (nu_int) over lens parameters")
+
+    # save info to data_vector_dict for later use
+    data_vector_dict['lens_params_nu_int_means'] = lens_params_nu_int_means
+    data_vector_dict['lens_params_nu_int_stddevs'] = lens_params_nu_int_stddevs
+
+    # setting these to None = a uniform modeling prior
+    if lens_params_nu_int_means is None and lens_params_nu_int_stddevs is None:
+        # set log prob. to zero, equivalent to a uniform prior...
+        data_vector_dict['log_prob_lens_param_samps_nu_int'] = np.zeros(
+            (data_vector_dict['lens_param_samples'].shape[0:2]))
+        
+    # diagonal Gaussian modeling prior...
     else:
-        # save info to data_vector_dict for later use
-        data_vector_dict['lens_params_nu_int_means'] = lens_params_nu_int_means
-        data_vector_dict['lens_params_nu_int_stddevs'] = lens_params_nu_int_stddevs
         # construct multivariate normal
         log_prob_lens_params_nu_int = multivariate_normal(
             mean=lens_params_nu_int_means,
@@ -351,6 +370,271 @@ def create_static_data_vectors(
 
 
     return data_vector_dict
+
+
+def FOM_vs_z_static_DV(posteriors_h5_file,
+    metadata_file,chosen_catalog_idx,
+    cosmo_model,
+    td_meas_error_percent=None,td_meas_error_days=None,
+    kappa_ext_meas_error_value=0.05,
+    kinematic_type=None,
+    kin_meas_error_percent=None,kin_meas_error_kmpersec=None,
+    num_gaussianized_samps=None,
+    lens_params_nu_int_means=None,
+    lens_params_nu_int_stddevs=None,
+    log_prob_beta_ani_nu_int=None,
+    debias_models=False):
+    """
+    Can keep fpd, c*sqrt(J) the same, must change measured time-delay, 
+        measured velocity dispersion, etc.
+    
+    """
+
+    if debias_models and kinematic_type is not None:
+        raise ValueError('de-biasing only works in TD-only case (for now)')
+
+    # pull relevant quantities for a SINGLE lens
+    # load in from posteriors file
+    with h5py.File(posteriors_h5_file, "r") as h5:
+
+        # find the right index
+        h5_catalog_idxs = h5['catalog_idxs'][:]
+        my_idx = np.isin(h5_catalog_idxs,chosen_catalog_idx)
+
+        fpd_samps = h5['fpd_samps'][my_idx]
+        lens_param_samps = h5['lens_param_samps'][my_idx]
+        beta_ani_samps = h5['beta_ani_samps'][my_idx]
+        h5_catalog_idxs = h5['catalog_idxs'][my_idx]
+
+        # pull c_sqrtJ_samps based on kinematic type
+        if kinematic_type is not None:
+            if kinematic_type == '4MOST':
+                c_sqrtJ_samps = h5['c_sqrtJ_samps'][my_idx]
+            elif kinematic_type == 'MUSE':
+                c_sqrtJ_samps = h5['MUSE_c_sqrtJ_samps'][my_idx]
+            elif kinematic_type == 'NIRSPEC':
+                c_sqrtJ_samps = h5['NIRSPEC_c_sqrtJ_samps'][my_idx]
+            else:
+                raise ValueError("kinematic_type not supported")
+            
+            num_kin_bins = np.shape(c_sqrtJ_samps)[-1]
+
+    # pull relevant metadata
+    all_metadata_df = pd.read_csv(metadata_file)
+    # set up indexing
+    metadata_catalog_idxs = all_metadata_df.loc[:,'catalog_idx']
+    metadata_idx = np.isin(metadata_catalog_idxs,chosen_catalog_idx)
+    metadata_row = all_metadata_df.loc[metadata_idx]
+
+    # loop through z_lens, z_src (make sure z_src > z_lens)
+    for z_lens in np.arange(0.,1.5,0.1):
+        for z_src in np.arange(0.5,3.0,0.1):
+            if z_src < z_lens: 
+                skip
+
+            # re-compute TD truth
+            # ALWAYS center on truth, keep 3% constraint
+
+            # re-compute KIN truth (sigma_v_NIRSPEC_kmpersec)
+            # ALWAYS center on truth, keep 5% constraint
+
+
+
+
+#########################################
+# Construct analytical static DVs
+#########################################
+
+def create_analytical_data_vectors(
+    posteriors_h5_file,metadata_file,catalog_idxs,
+    td_meas_error_percent=None,td_meas_error_days=None,
+    kappa_ext_meas_error_value=0.05,
+    num_kappa_ext_samps=None,
+    kinematic_type=None,
+    kin_meas_error_percent=None,kin_meas_error_kmpersec=None,
+    lens_params_nu_int_means=None,
+    lens_params_nu_int_stddevs=None,
+    beta_ani_nu_int_mean=None,
+    beta_ani_nu_int_stddev=None,
+    fermat_pot_nu_int_mean=None,
+    fermat_pot_nu_int_stddev=None,
+    csqrtJ_nu_int_mean=None,
+    csqrtJ_nu_int_stddev=None,
+    debias_models=False):
+    """ For analytical version of likelihood, need to save 2 Gaussians 
+        for each lens (Mean,Prec) in order (fpd,csqrtJ,lens_params,beta_ani). 
+        The image-based model (_model) and the interim prior (_int)
+    Args:
+        
+    
+    Returns: 
+        (dict) data_vector_dict = 
+            {   'catalog_idxs':,
+                'z_src':,
+                'z_lens':,
+                'td_measured':,
+                'td_likelihood_prec':,
+                'sigma_v_measured':,
+                'sigma_v_likelihood_prec':,
+                'kappa_ext_samples',
+                'mu_model':,
+                'prec_model':,
+                'mu_int':,
+                'prec_int':
+            }
+        
+    """
+
+    if debias_models and kinematic_type is not None:
+        raise ValueError('de-biasing only works in TD-only case (for now)')
+
+    # load in from posteriors file
+    with h5py.File(posteriors_h5_file, "r") as h5:
+
+        # set-up indexing
+        h5_catalog_idxs = h5['catalog_idxs'][:]
+        my_idxs = np.isin(h5_catalog_idxs,catalog_idxs)
+
+        fpd_samps = h5['fpd_samps'][my_idxs]
+        lens_param_samps = h5['lens_param_samps'][my_idxs]
+        beta_ani_samps = h5['beta_ani_samps'][my_idxs]
+        h5_catalog_idxs = h5['catalog_idxs'][my_idxs]
+
+        # pull c_sqrtJ_samps based on kinematic type
+        if kinematic_type is not None:
+            if kinematic_type == '4MOST':
+                c_sqrtJ_samps = h5['c_sqrtJ_samps'][my_idxs]
+            elif kinematic_type == 'MUSE':
+                c_sqrtJ_samps = h5['MUSE_c_sqrtJ_samps'][my_idxs]
+            elif kinematic_type == 'NIRSPEC':
+                c_sqrtJ_samps = h5['NIRSPEC_c_sqrtJ_samps'][my_idxs]
+            else:
+                raise ValueError("kinematic_type not supported")
+            
+            num_kin_bins = np.shape(c_sqrtJ_samps)[-1]
+            
+    # set up some sizes
+    num_lenses = np.shape(fpd_samps)[0]
+    num_td = np.shape(fpd_samps)[-1]
+    num_lp = np.shape(lens_param_samps)[-1]
+            
+    # load in from metadata file
+    all_metadata_df = pd.read_csv(metadata_file)
+    # set up indexing
+    metadata_catalog_idxs = all_metadata_df.loc[:,'catalog_idx']
+    metadata_idx = np.isin(metadata_catalog_idxs,catalog_idxs)
+    metadata_df = all_metadata_df.loc[metadata_idx]
+
+    # emulate time-delay measurement
+    td_truth = retrieve_truth_td(metadata_df, num_td)
+    td_meas, td_meas_prec = emulate_measurements(td_truth, 
+        td_meas_error_percent,td_meas_error_days)
+    
+    # emulate kappa_ext
+    kappa_ext_samps = norm.rvs(loc=0.,
+        scale=kappa_ext_meas_error_value,
+        size=(num_lenses,num_kappa_ext_samps))
+    
+    # emulate kinematics
+    if kinematic_type is not None:
+        kin_truth = retrieve_truth_kin(metadata_df,kinematic_type)
+        sigma_v_meas,sigma_v_meas_prec = emulate_measurements(kin_truth,
+            kin_meas_error_percent,kin_meas_error_kmpersec)
+
+    # Gaussianize the image-based model
+    # FOR ANALYTICAL: NEEDS TO BE IN ORDER:
+    #   with kin: (fpd,csqrtJ,lens_params,beta_ani)
+    #   without kin: (fpd,lens_params)
+    to_gaussianize_input = []
+
+    # Component 1: fpds
+    fpd_truth = retrieve_truth_fpd(metadata_df,num_td)
+    for i in range(0,num_td):
+        to_gaussianize_input.append(fpd_samps[:,:,i])
+
+    # Component 2: csqrtJ (if kin)
+    if kinematic_type is not None:
+        # sigma_v bins
+        for j in range(0,num_kin_bins):
+            to_gaussianize_input.append(c_sqrtJ_samps[:,:,j])
+
+    # Component 3: lens_params
+    lp_truth = retrieve_truth_lp(metadata_df)
+    for lp in range(0,num_lp):
+        to_gaussianize_input.append(lens_param_samps[:,:,lp])
+
+    # Component 4: beta_ani (if kin)
+    if kinematic_type is not None:
+        to_gaussianize_input.append(beta_ani_samps)
+    # kinematics
+
+    # Now we actually do the Gaussian-izing here...
+    to_gaussianize_input = np.asarray(to_gaussianize_input)
+    # switch 1st dim to last dim (parameters dim)
+    input_samps = np.transpose(to_gaussianize_input,axes=(1,2,0))
+    num_params = np.shape(to_gaussianize_input)[-1]
+    mu_model_list = np.empty((num_lenses,num_params))
+    cov_model_list = np.empty((num_lenses,num_params,num_params))
+    # now gaussianize
+    for l_idx in range(0,num_lenses):
+        mu_model,cov_model = gaussianize(input_samps[l_idx])
+        mu_model_list[l_idx] = mu_model
+        cov_model_list[l_idx] = cov_model
+
+    # Now, fill in the dict of data vectors
+    data_vector_dict ={}
+
+    # catalog idxs
+    data_vector_dict['catalog_idxs'] = np.asarray(catalog_idxs)
+
+    # redshifts
+    data_vector_dict['z_lens'] = metadata_df.loc[:,'main_deflector_parameters_z_lens'].to_numpy()
+    data_vector_dict['z_src'] = metadata_df.loc[:,'source_parameters_z_source'].to_numpy()
+
+    # save emulated measurements
+    # time-delays
+    data_vector_dict['td_measured'] = td_meas
+    data_vector_dict['td_likelihood_prec'] = td_meas_prec
+    # kappa_ext samples
+    data_vector_dict['kappa_ext_samples'] = kappa_ext_samps
+    # kinematics
+    if kinematic_type is not None:
+        data_vector_dict['sigma_v_measured'] = sigma_v_meas
+        data_vector_dict['sigma_v_likelihood_prec'] = sigma_v_meas_prec
+
+    # save mu_model, prec_model
+    data_vector_dict['mu_model'] = mu_model_list
+    # NOTE: might need to double check symmetry after this (was having issues 
+    # with numpy numerical limitations before)
+    data_vector_dict['prec_model'] = np.linalg.inv(cov_model_list)
+
+    # construct & save mu_int,prec_int
+    # in order (fpd,csqrtJ,lens_params,beta_ani)
+    mu_int = np.asarray(fermat_pot_nu_int_mean)
+    if kinematic_type is not None:
+        mu_int = np.concatenate((mu_int,csqrtJ_nu_int_mean))
+    mu_int = np.concatenate((mu_int,lens_params_nu_int_means))
+    if kinematic_type is not None:
+        mu_int = np.concatenate((mu_int,beta_ani_nu_int_mean))
+
+    stddev_int = np.asarray(fermat_pot_nu_int_stddev)
+    if kinematic_type is not None:
+        stddev_int = np.concatenate((stddev_int,csqrtJ_nu_int_stddev))
+    stddev_int = np.concatenate((stddev_int,lens_params_nu_int_stddevs))
+    if kinematic_type is not None:
+        stddev_int = np.concatenate((stddev_int,beta_ani_nu_int_stddev))
+    # put 1/sigma^2 on the diagonal
+    prec_int = np.diag(1/(stddev_int**2))
+
+    # repeat mu_int, prec_int once for each lens
+    mu_int = np.repeat(mu_int[np.newaxis,:],num_lenses,axis=0)
+    prec_int = np.repeat(prec_int[np.newaxis,:,:],num_lenses,axis=0)
+
+    data_vector_dict['mu_int'] = mu_int
+    data_vector_dict['prec_int'] = prec_int
+
+    return data_vector_dict
+
 
 #############################
 # Construct likelihood object
