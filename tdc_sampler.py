@@ -744,6 +744,38 @@ def w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
     
     return 0
 
+def tdcosmo25_lambda_int_beta_ani_log_prior(hyperparameters):
+    """
+    Args:
+        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
+            mu_gamma,sigma_gamma])
+    """
+
+    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+        return -np.inf
+    elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+        return -np.inf
+    #w0 [-1.5,0.5]
+    elif hyperparameters[2] < -1.5 or hyperparameters[2] > 0.5:
+        return -np.inf
+    #wa [-10,10]
+    elif hyperparameters[3] < -10 or hyperparameters[3] > 10:
+        return -np.inf
+    elif hyperparameters[4] < 0.5 or hyperparameters[4] > 1.5: #mu(lambda_int)
+        return -np.inf
+    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.5: #sigma(lambda_int)
+        return -np.inf
+    elif hyperparameters[6] < -0.5 or hyperparameters[6] > 0.5: #mu(beta_ani)
+        return -np.inf
+    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.2: #sigma(beta_ani)
+        return -np.inf
+    elif hyperparameters[8] < 1.5 or hyperparameters[8] > 2.5: #mu(gamma_lens)
+        return -np.inf
+    elif hyperparameters[9] < 0.001 or hyperparameters[9] > 0.2: #sigma(gamma_lens)
+        return -np.inf
+    
+    return 0
+
 def OmegaM_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
     """Include approximation of Pantheon+ Prior used in TDCOSMO 2025 (https://arxiv.org/pdf/2506.03023)
         Note page 17: "Pantheon+ effectively provided a prior on Ωm (i.e., Ωm = 0.334 ± 0.018)"
@@ -909,7 +941,7 @@ def dynesty_prior_transform(uniform_draw):
 
     return x
 
-def generate_initial_state(n_walkers,cosmo_model):
+def generate_initial_state(n_walkers,cosmo_model,use_tdcosmo25=False):
     """
     Args:
         n_walkers (int): number of emcee walkers
@@ -972,7 +1004,11 @@ def generate_initial_state(n_walkers,cosmo_model):
         cur_state = np.empty((n_walkers,10))
         cur_state[:,0] = norm.rvs(loc=70.,scale=5.,size=n_walkers) #h0
         cur_state[:,1] = truncnorm.rvs(-.3/.1,.2/0.1,loc=0.3,scale=0.1,size=n_walkers) #Omega_M
-        cur_state[:,2] = truncnorm.rvs(-1/.2,1/.2,loc=-1.,scale=0.2,size=n_walkers) #w0
+        # NOTE: out of bounds for TDCOSMO25 prior! 
+        if use_tdcosmo25:
+            cur_state[:,2] = truncnorm.rvs(-0.5/0.2,1.5/0.2,loc=-1.,scale=0.2,size=n_walkers) #w0
+        else:
+            cur_state[:,2] = truncnorm.rvs(-1/.2,1/.2,loc=-1.,scale=0.2,size=n_walkers) #w0
         cur_state[:,3] = truncnorm.rvs(-1/.2,1/.2,loc=0.,scale=0.2,size=n_walkers) #wa
         cur_state[:,4] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=1.,scale=0.1,size=n_walkers) # mu(lambda_int)
         cur_state[:,5] = uniform.rvs(loc=0.01,scale=0.49,size=n_walkers)
@@ -1032,7 +1068,7 @@ def log_likelihood(hyperparameters,tdc_likelihood_list):
     return fll
 
 def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
-    use_informative=False,use_OmegaM=False):
+    use_informative=False,use_OmegaM=False,use_tdcosmo25=False):
     """
     Args:
         hyperparameters ([float]): 
@@ -1058,6 +1094,8 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
             lp = INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
         elif use_OmegaM:
             lp = OmegaM_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+        elif use_tdcosmo25:
+            lp = tdcosmo25_lambda_int_beta_ani_log_prior(hyperparameters)
         else:
             lp = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
     elif cosmo_model == 'w0waCDM_fullcPDF':
@@ -1073,7 +1111,8 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
 
 def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     n_walkers=20, use_mpi=False, use_multiprocess=False, backend_path=None, 
-    reset_backend=True,sampler_type='emcee',use_informative=False,use_OmegaM=False):
+    reset_backend=True,sampler_type='emcee',use_informative=False,
+    use_OmegaM=False,use_tdcosmo25=False):
     """
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
@@ -1107,7 +1146,7 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
 
     log_posterior_fn = partial(log_posterior, cosmo_model=cosmo_model,
         tdc_likelihood_list=tdc_likelihood_list,use_informative=use_informative,
-        use_OmegaM=use_OmegaM)
+        use_OmegaM=use_OmegaM,use_tdcosmo25=use_tdcosmo25)
     # need this fnc for dynesty
     log_likelihood_fn = partial(log_likelihood,
         tdc_likelihood_list=tdc_likelihood_list)
@@ -1118,7 +1157,7 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     #log_likelihood(hyperparameters,tdc_likelihood_list)
 
     # generate initial state
-    cur_state = generate_initial_state(n_walkers,cosmo_model)
+    cur_state = generate_initial_state(n_walkers,cosmo_model,use_tdcosmo25=use_tdcosmo25)
 
     # emcee stuff here
     if not use_mpi:
