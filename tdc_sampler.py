@@ -941,12 +941,16 @@ def dynesty_prior_transform(uniform_draw):
 
     return x
 
-def generate_initial_state(n_walkers,cosmo_model,use_tdcosmo25=False):
+def generate_initial_state(n_walkers,cosmo_model,use_tdcosmo25=False,
+        random_seed=None):
     """
     Args:
         n_walkers (int): number of emcee walkers
         cosmo_model (string): 'LCDM' or 'w0waCDM'
     """
+
+    if random_seed is not None:
+        np.random.seed(random_seed)
 
     if cosmo_model == 'LCDM':
         # order: [H0,Omega_M,mu_gamma,sigma_gamma]
@@ -1112,7 +1116,7 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
 def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     n_walkers=20, use_mpi=False, use_multiprocess=False, backend_path=None, 
     reset_backend=True,sampler_type='emcee',use_informative=False,
-    use_OmegaM=False,use_tdcosmo25=False):
+    use_OmegaM=False,use_tdcosmo25=False,init_seed=None):
     """
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
@@ -1124,6 +1128,8 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
             Otherwise, returns the chain.
         sampler_type (string): 'emcee' or 'dynesty'
         use_informative, use_OmegaM: Boolean flags, control the use of informative priors...
+        init_seed (int or None): if specified, seeds the random 
+            initialization of walkers
         
     Returns: 
         mcmc chain (emcee.EnsemblerSampler.chain or dynesty.NestedSampler.)
@@ -1157,7 +1163,9 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     #log_likelihood(hyperparameters,tdc_likelihood_list)
 
     # generate initial state
-    cur_state = generate_initial_state(n_walkers,cosmo_model,use_tdcosmo25=use_tdcosmo25)
+    cur_state = generate_initial_state(n_walkers,cosmo_model,
+        use_tdcosmo25=use_tdcosmo25,
+        random_seed=init_seed)
 
     # emcee stuff here
     if not use_mpi:
