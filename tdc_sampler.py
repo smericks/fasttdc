@@ -723,11 +723,11 @@ def w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
         return -np.inf
     elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
         return -np.inf
-    #w0 [-2,0]
-    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
+    #w0 [-3,1]
+    elif hyperparameters[2] < -3 or hyperparameters[2] > 1:
         return -np.inf
-    #wa [-2,2]
-    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
+    #wa [-4,4]
+    elif hyperparameters[3] < -4 or hyperparameters[3] > 4:
         return -np.inf
     elif hyperparameters[4] < 0.5 or hyperparameters[4] > 1.5: #mu(lambda_int)
         return -np.inf
