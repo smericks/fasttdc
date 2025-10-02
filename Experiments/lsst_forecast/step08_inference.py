@@ -59,11 +59,13 @@ for dv_dict in data_vector_dict_list:
         lklhd_obj = tdc_sampler.TDCKinLikelihood(
             fpd_sample_shape, kin_pred_samples_shape,
             cosmo_model=config_module.COSMO_MODEL,
-            use_astropy=USE_ASTROPY)
+            use_astropy=USE_ASTROPY,
+            use_gamma_info=config_module.HI_REWEIGHTING)
     else:
         lklhd_obj = tdc_sampler.TDCLikelihood(fpd_sample_shape,
             cosmo_model=config_module.COSMO_MODEL,
-            use_astropy=USE_ASTROPY)
+            use_astropy=USE_ASTROPY,
+            use_gamma_info=config_module.HI_REWEIGHTING)
 
     likelihood_obj_list.append(lklhd_obj)
 
@@ -75,7 +77,10 @@ tenIFU_chain = tdc_sampler.fast_TDC(likelihood_obj_list,data_vector_dict_list,
     n_walkers=config_module.NUM_MCMC_WALKERS,
     use_mpi=use_MPI, use_multiprocess=use_multiprocess,
     backend_path=config_module.BACKEND_PATH,
-    reset_backend=config_module.RESET_BACKEND)
+    reset_backend=config_module.RESET_BACKEND,
+    use_OmegaM=getattr(config_module, "OMEGA_M_PRIOR", False),
+    use_tdcosmo25=getattr(config_module, "TDCOSMO_PRIOR", False),
+    init_seed=getattr(config_module, "INIT_SEED", None))
 end = time.time()
 print('Time to run MCMC:',end-start)
 

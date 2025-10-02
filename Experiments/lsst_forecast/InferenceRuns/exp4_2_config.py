@@ -1,4 +1,4 @@
-# experiment 5.1: Gold-Only Baseline, Human-Bias Selected
+# experiment 4.1: Extra HST Imaging, Human-Bias Selected, Gold+Silver
 
 import h5py
 import pandas as pd
@@ -9,7 +9,7 @@ from scipy.stats import norm
 RANDOM_SEED = 1
 
 # file locations
-static_dv_file = 'InferenceRuns/exp5_1/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
+static_dv_file = 'InferenceRuns/exp4_2/static_datavectors_seed'+str(RANDOM_SEED)+'.json'
 
 # 4 modeling options...locations of samples from joint fermat/csqrt(J) posteriors
 JWST_quads_h5_file = 'DataVectors/gold/quad_posteriors_JWST_DEBIASED.h5'
@@ -37,9 +37,8 @@ stddev_lp_gold = np.asarray([0.28,0.06,0.06,0.16,0.20,0.20,0.06,0.06,0.34,0.34])
 mu_lp_silver = np.asarray([1.42,0.,0.,2.03,0.,0.,0.,0.,0.,0.])# norms2.csv
 stddev_lp_silver = np.asarray([0.70,0.1,0.1,0.20,0.20,0.20,0.06,0.06,0.37,0.37])
 BETA_ANI_PRIOR = norm(loc=0.,scale=0.2).logpdf
-BACKEND_PATH = 'InferenceRuns/exp5_1/w0wa_seed'+str(RANDOM_SEED)+'_backend.h5'
+BACKEND_PATH = 'InferenceRuns/exp4_2/w0wa_seed'+str(RANDOM_SEED)+'_backend.h5'
 RESET_BACKEND=True
-
 
 # truth information for those indices
 gold_df = pd.read_csv(gold_metadata_file)
@@ -60,6 +59,7 @@ nirspec_quads_avail = np.where(
     ((np.abs(gold_df['td01'].to_numpy()) > 30.) | 
      (np.abs(gold_df['td02'].to_numpy()) > 30.) | 
      (np.abs(gold_df['td03'].to_numpy()) > 30.)) &
+    #(truth_df['lens_light_parameters_mag_app'].to_numpy() > 22.) &
     (gold_df['lens_light_parameters_mag_app'].to_numpy() < 24.) &
     (gold_df['source_parameters_mag_app'].to_numpy() < 24.)
 )[0]
@@ -138,7 +138,6 @@ fourmost_dbls_catalog_idxs = np.random.choice(catalog_idx_avail,
     size=num_dbls,replace=False)
 # then remove them from the dataframe
 gold_df = gold_df[~gold_df['catalog_idx'].isin(fourmost_dbls_catalog_idxs)].reset_index(drop=True)
-
 
 # NOTE: when evaluating kinematics at each sample, some samples return nan, we exclude those lenses
 silver_nan_kinematic_vals = [ 26,   41,   56,  104,  106,  134,  198,  263, 
@@ -256,48 +255,13 @@ likelihood_configs = {
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
-    # NOTE: splitting into 60 with LTM, 90 without 
-    #   (there's 75 quads and 75 doubles to start with...)
-    # 4MOST LTM likelihoods (30 quads, 30 doubles)
-    '4MOST_quads':{
-        'posteriors_h5_file':HST_NPE_quads_h5_file,
-        'metadata_file':gold_metadata_file,
-        'catalog_idxs':fourmost_quads_catalog_idxs[:30],
-        'cosmo_model':COSMO_MODEL,
-        'td_meas_error_percent':None,
-        'td_meas_error_days':2., #TODO: switch to histogram
-        'kappa_ext_meas_error_value':0.05,
-        'kinematic_type':'4MOST',
-        'kin_meas_error_percent':0.05,
-        'kin_meas_error_kmpersec':None,
-        'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'lens_params_nu_int_means':mu_lp_gold,
-        'lens_params_nu_int_stddevs':stddev_lp_gold,
-        'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
-    },
 
-    '4MOST_dbls':{
-        'posteriors_h5_file':HST_NPE_dbls_h5_file,
-        'metadata_file':gold_metadata_file,
-        'catalog_idxs':fourmost_dbls_catalog_idxs[:30],
-        'cosmo_model':COSMO_MODEL,
-        'td_meas_error_percent':None,
-        'td_meas_error_days':2., #TODO: switch to histogram
-        'kappa_ext_meas_error_value':0.05,
-        'kinematic_type':'4MOST',
-        'kin_meas_error_percent':0.05,
-        'kin_meas_error_kmpersec':None,
-        'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'lens_params_nu_int_means':mu_lp_gold,
-        'lens_params_nu_int_stddevs':stddev_lp_gold,
-        'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
-    },
-
-    # 4MOST no LTM likelihoods (45 quads, 45 doubles)
+    # NOTE: in this experiment, these 150 lenses get forward modeling!
+    # 4MOST likelihoods (150 lenses)
     '4MOST_quads':{
-        'posteriors_h5_file':HST_NPE_quads_h5_file,
+        'posteriors_h5_file':HST_FM_quads_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':fourmost_quads_catalog_idxs[30:],
+        'catalog_idxs':fourmost_quads_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':None,
         'td_meas_error_days':5.,
@@ -312,9 +276,9 @@ likelihood_configs = {
     },
 
     '4MOST_dbls':{
-        'posteriors_h5_file':HST_NPE_dbls_h5_file,
+        'posteriors_h5_file':HST_FM_dbls_h5_file,
         'metadata_file':gold_metadata_file,
-        'catalog_idxs':fourmost_dbls_catalog_idxs[30:],
+        'catalog_idxs':fourmost_dbls_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':None,
         'td_meas_error_days':5.,
@@ -335,7 +299,7 @@ likelihood_configs = {
     # Silver 4MOST likelihoods (300 lenses)
     'silver_4MOST_quads':{
         'posteriors_h5_file':LSST_NPE_quads_h5_file,
-        'metadata_file':silver_metadata_file,
+        'metadata_file':gold_metadata_file,
         'catalog_idxs':silver_withkin_quads_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':None,
@@ -345,14 +309,14 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'lens_params_nu_int_means':mu_lp_silver,
-        'lens_params_nu_int_stddevs':stddev_lp_silver,
+        'lens_params_nu_int_means':mu_lp_gold,
+        'lens_params_nu_int_stddevs':stddev_lp_gold,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
     'silver_4MOST_dbls':{
         'posteriors_h5_file':LSST_NPE_dbls_h5_file,
-        'metadata_file':silver_metadata_file,
+        'metadata_file':gold_metadata_file,
         'catalog_idxs':silver_withkin_dbls_catalog_idxs,
         'cosmo_model':COSMO_MODEL,
         'td_meas_error_percent':None,
@@ -362,8 +326,8 @@ likelihood_configs = {
         'kin_meas_error_percent':0.05,
         'kin_meas_error_kmpersec':None,
         'num_gaussianized_samps':NUM_FPD_SAMPS,
-        'lens_params_nu_int_means':mu_lp_silver,
-        'lens_params_nu_int_stddevs':stddev_lp_silver,
+        'lens_params_nu_int_means':mu_lp_gold,
+        'lens_params_nu_int_stddevs':stddev_lp_gold,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
     },
 
@@ -384,7 +348,7 @@ likelihood_configs = {
         'lens_params_nu_int_means':mu_lp_silver,
         'lens_params_nu_int_stddevs':stddev_lp_silver,
         'log_prob_beta_ani_nu_int':BETA_ANI_PRIOR
-    },
+    }
 }
 
 # handle edge case where no silver quads w/out kin

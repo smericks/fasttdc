@@ -2,13 +2,15 @@ import time
 import sys
 from functools import partial
 import emcee
+import dynesty
 import jax
 import jax.numpy as jnp
 import jax_cosmo
 import numpy as np
 from astropy.cosmology import w0waCDM
-from scipy.stats import norm, truncnorm, uniform
+from scipy.stats import norm, truncnorm, uniform, multivariate_normal
 import Utils.tdc_utils as tdc_utils
+import math
 
 USE_JAX = False
 
@@ -22,6 +24,7 @@ cosmo_models available:
         mu(gamma_lens),sigma(gamma_lens)]
     'LCDM_lambda_int_beta_ani'
     'w0waCDM_lambda_int_beta_ani'
+    'w0waCDM_fullcPDF'
 """
 
 ###########################
@@ -40,24 +43,7 @@ class TDCLikelihood():
         Keep track of quantities that remain constant throughout the inference
 
         Args:
-            td_measured: array of td_measured
-                doubles: (n_lenses,1)
-                quads: (n_lenses,3)
-            td_likelihood_prec: array of precision matrices:
-                - doubles: ((1/sigma^2))
-                - quads: ((1/sigma^2 0 0), (0 1/sigma^2 0), (0 0 1/sigma^2))
-            fpd_samples: array of fermat potential difference posterior samples
-                doubles: (n_lenses,n_fpd_samples,1)
-                quads: (n_lenses,n_fpd_samples,3)
-            gamma_pred_samples (np.array(float)):
-                gamma samples associated with each set of fpd samples.
-                (n_lenses,n_fpd_samples)
-            z_lens (np.array(float), size:(n_lenses)): lens redshifts
-            z_src (np.array(float), size:(n_lenses)): source redshifts
-            kappa_ext_samples (np.array(float), size:(n_lenses,n_fpd_samples)):
-                default is None (kappa_ext not considered)
-            log_prob_gamma_nu_int (callable): function that produces logpdf(values)
-                for the modeling prior on gamma_lens (also called nu_int)
+            fpd_sample_shape ()
             cosmo_model (string): 'LCDM' or 'w0waCDM'
             use_gamma_info (bool): If False, removes reweighting from likelihood
                 evaluation (any population level gamma params should just
@@ -67,10 +53,12 @@ class TDCLikelihood():
         # no processing needed (np.squeeze ensures any dimensions of size 1
         #    are removed)
         if cosmo_model not in ['LCDM', 'LCDM_lambda_int',
-                               'LCDM_lambda_int_beta_ani', 'w0waCDM', 'w0waCDM_lambda_int_beta_ani']:
+                               'LCDM_lambda_int_beta_ani', 'w0waCDM', 
+                               'w0waCDM_lambda_int_beta_ani',
+                               'w0waCDM_fullcPDF','w0waCDM_fullcPDF_noKIN']:
             raise ValueError("choose from available cosmo_models: " +
                              "LCDM, LCDM_lambda_int, LCDM_lambda_int_beta_ani, w0waCDM, " +
-                             "w0waCDM_lambda_int_beta_ani")
+                             "w0waCDM_lambda_int_beta_ani, w0waCDM_fullcPDF")
         self.cosmo_model = cosmo_model
         self.use_gamma_info = use_gamma_info
         self.use_astropy = use_astropy
@@ -169,7 +157,8 @@ class TDCLikelihood():
                                 'LCDM_lambda_int_beta_ani']:
             w0_input = -1.
             wa_input = 0.
-        elif self.cosmo_model in ['w0waCDM', 'w0waCDM_lambda_int_beta_ani']:
+        elif self.cosmo_model in ['w0waCDM', 'w0waCDM_lambda_int_beta_ani',
+                                  'w0waCDM_fullcPDF','w0waCDM_fullcPDF_noKIN']:
             w0_input = hyperparameters[2]
             wa_input = hyperparameters[3]
 
@@ -213,16 +202,16 @@ class TDCLikelihood():
             # NOTE: hardcoding of hyperparameter order!! (-4 is mu, -3 is sigma)
             mu_lint = hyperparameters[-4]
             sigma_lint = hyperparameters[-3]
-        elif self.cosmo_model == 'LCDM_lambda_int_beta_ani':
+        elif self.cosmo_model in ['LCDM_lambda_int_beta_ani',
+                                  'w0waCDM_lambda_int_beta_ani']:
             # NOTE: hardcoding of hyperparameter order!! (-6 is mu, -5 is sigma)
             mu_lint = hyperparameters[-6]
             sigma_lint = hyperparameters[-5]
-            # truncating to avoid values below 0 (unphysical)
-        elif self.cosmo_model == 'w0waCDM_lambda_int_beta_ani':
-            # NOTE: hardcoding of hyperparameter order!! (-6 is mu, -5 is sigma)
-            mu_lint = hyperparameters[-6]
-            sigma_lint = hyperparameters[-5]
-            # truncating to avoid values below 0 (unphysical)
+
+        elif self.cosmo_model == 'w0waCDM_fullcPDF':
+            # NOTE: hardcoding of hyperparameter order!! (4 is mu, 5 is sigma)
+            mu_lint = hyperparameters[4]
+            sigma_lint = hyperparameters[5]
 
         if mu_lint is not None:
             lambda_int_samples = truncnorm.rvs(-mu_lint / sigma_lint, np.inf,
@@ -246,25 +235,14 @@ class TDCLikelihood():
         # td_pred_samples from fpd_pred_samples
         td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo, index_likelihood_list,
                                                      lambda_int_samples)
-        # TODO test jitting this
-        if USE_JAX:
-            td_log_likelihoods = jax_utils.jax_td_log_likelihood_per_samp(
-                jnp.asarray(td_pred_samples), jnp.asarray(data_vector_global[index_likelihood_list]['td_measured']),
-                jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prec']),
-                jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prefactors']))
-            td_log_likelihoods = np.asarray(td_log_likelihoods)
-        else:
-            td_log_likelihoods = self.td_log_likelihood_per_samp(
-                td_pred_samples, index_likelihood_list
-            )
+        td_log_likelihoods = self.td_log_likelihood_per_samp(
+            td_pred_samples, index_likelihood_list
+        )
 
         # reweighting factor
-        # NOTE: hardcoding of hyperparameter order!! (-2 is mu, -1 is sigma)
-        #TODO check this
+        # TODO: fix this for new framework
         if self.use_gamma_info:
-            eval_at_proposed_nu = norm.logpdf(data_vector_global[index_likelihood_list]['gamma_pred_samples'],
-                                              loc=hyperparameters[-2], scale=hyperparameters[-1])
-            rw_factor = eval_at_proposed_nu - data_vector_global[index_likelihood_list]['log_prob_gamma_samps_nu_int']
+            rw_factor = self.compute_rw_factor(hyperparameters,index_likelihood_list)
         else:
             rw_factor = 0.
 
@@ -278,6 +256,135 @@ class TDCLikelihood():
         log_likelihood = np.sum(np.log(individ_likelihood))
 
         return log_likelihood
+    
+    def compute_rw_factor(self,hyperparameters,index_likelihood_list):
+
+        # retrieve interim hypermodel
+        nu_means = data_vector_global[index_likelihood_list]['lens_params_nu_int_means']
+        nu_stddevs = data_vector_global[index_likelihood_list]['lens_params_nu_int_stddevs']
+
+        if nu_means is not None:
+
+            # modify into proposed hypermodel
+            if self.cosmo_model == 'w0waCDM_fullcPDF':
+                # theta_E
+                nu_means[0] = hyperparameters[10]
+                nu_stddevs[0] = hyperparameters[11]
+                # external shear (gamma1,gamma2)
+                nu_means[1] = 0.
+                nu_means[2] = 0.
+                nu_stddevs[1] = hyperparameters[12]
+                nu_stddevs[2] = hyperparameters[12]
+                # gamma_lens
+                nu_means[3] = hyperparameters[8]
+                nu_stddevs[3] = hyperparameters[9]
+                # ellipticity (e1,e2) 
+                nu_means[4] = 0.
+                nu_means[5] = 0.
+                nu_stddevs[4] = hyperparameters[13]
+                nu_stddevs[5] = hyperparameters[13]
+
+            elif self.cosmo_model == 'w0waCDM_fullcPDF_noKIN': 
+                # theta_E
+                nu_means[0] = hyperparameters[6]
+                nu_stddevs[0] = hyperparameters[7]
+                # external shear (gamma1,gamma2)
+                nu_means[1] = 0.
+                nu_means[2] = 0.
+                nu_stddevs[1] = hyperparameters[8]
+                nu_stddevs[2] = hyperparameters[8]
+                # gamma_lens
+                nu_means[3] = hyperparameters[4]
+                nu_stddevs[3] = hyperparameters[5]
+                # ellipticity (e1,e2) 
+                nu_means[4] = 0.
+                nu_means[5] = 0.
+                nu_stddevs[4] = hyperparameters[9]
+                nu_stddevs[5] = hyperparameters[9]
+
+            else: # all other models
+                # only change gamma_lens
+                nu_means[3] = hyperparameters[-2]
+                nu_stddevs[3] = hyperparameters[-1]
+
+            # TODO: check if this returns the right dimensional thing
+            eval_at_proposed_nu = multivariate_normal.logpdf(
+                data_vector_global[index_likelihood_list]['lens_param_samples'],
+                mean=nu_means,
+                cov=np.diag(nu_stddevs**2))
+
+            rw_factor = (eval_at_proposed_nu - 
+                data_vector_global[index_likelihood_list]['log_prob_lens_param_samps_nu_int'])
+            
+        else: 
+            # uniform interim prior!!
+
+            # modify into proposed hypermodel
+            if self.cosmo_model == 'w0waCDM_fullcPDF':
+                nu_means = np.empty(6)
+                nu_stddevs = np.empty(6)
+
+                # theta_E
+                nu_means[0] = hyperparameters[10]
+                nu_stddevs[0] = hyperparameters[11]
+                # external shear (gamma1,gamma2)
+                nu_means[1] = 0.
+                nu_means[2] = 0.
+                nu_stddevs[1] = hyperparameters[12]
+                nu_stddevs[2] = hyperparameters[12]
+                # gamma_lens
+                nu_means[3] = hyperparameters[8]
+                nu_stddevs[3] = hyperparameters[9]
+                # ellipticity (e1,e2) 
+                nu_means[4] = 0.
+                nu_means[5] = 0.
+                nu_stddevs[4] = hyperparameters[13]
+                nu_stddevs[5] = hyperparameters[13]
+
+                # this is directly the rw_factor, there is no interim prior to subtract off...
+                rw_factor = multivariate_normal.logpdf(
+                    data_vector_global[index_likelihood_list]['lens_param_samples'][:,:,:6],
+                    mean=nu_means,cov=np.diag(nu_stddevs**2))
+
+
+            elif self.cosmo_model == 'w0waCDM_fullcPDF_noKIN': 
+                nu_means = np.empty(6)
+                nu_stddevs = np.empty(6)
+    
+                # theta_E
+                nu_means[0] = hyperparameters[6]
+                nu_stddevs[0] = hyperparameters[7]
+                # external shear (gamma1,gamma2)
+                nu_means[1] = 0.
+                nu_means[2] = 0.
+                nu_stddevs[1] = hyperparameters[8]
+                nu_stddevs[2] = hyperparameters[8]
+                # gamma_lens
+                nu_means[3] = hyperparameters[4]
+                nu_stddevs[3] = hyperparameters[5]
+                # ellipticity (e1,e2) 
+                nu_means[4] = 0.
+                nu_means[5] = 0.
+                nu_stddevs[4] = hyperparameters[9]
+                nu_stddevs[5] = hyperparameters[9]
+
+                # this is directly the rw_factor, there is no interim prior to subtract off...
+                rw_factor = multivariate_normal.logpdf(
+                    data_vector_global[index_likelihood_list]['lens_param_samples'][:,:,:6],
+                    mean=nu_means,cov=np.diag(nu_stddevs**2))
+
+            else: # all other models
+                # only change gamma_lens
+                gamma_mean = hyperparameters[-2]
+                gamma_stddev = hyperparameters[-1]
+
+                # this is directly the rw_factor, there is no interim prior to subtract off...
+                rw_factor = norm.logpdf(
+                    data_vector_global[index_likelihood_list]['lens_param_samples'][:,:,3],
+                    loc=gamma_mean,scale=gamma_stddev)
+                
+            
+        return rw_factor
 
     @staticmethod
     def ddt_posterior_from_td_fpd(td_measured, td_likelihood_prec, fpd_samples,
@@ -454,78 +561,65 @@ class TDCKinLikelihood(TDCLikelihood):
         # td log likelihood per sample
         td_pred_samples = self.td_pred_from_fpd_pred(
             proposed_cosmo, index_likelihood_list, lambda_int_samples)
-        # TODO: test jitting this
-        if USE_JAX:
-            td_log_likelihoods = jax_utils.jax_td_log_likelihood_per_samp(
-                jnp.asarray(td_pred_samples) ,jnp.asarray(data_vector_global[index_likelihood_list]['td_measured']),
-                jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prec']),
-                jnp.asarray(data_vector_global[index_likelihood_list]['td_likelihood_prefactors']))
-        else:
-            td_log_likelihoods = self.td_log_likelihood_per_samp(
-                td_pred_samples, index_likelihood_list
-            )
+        td_log_likelihoods = self.td_log_likelihood_per_samp(
+            td_pred_samples, index_likelihood_list
+        )
         td_log_likelihoods = np.asarray(td_log_likelihoods)
 
         # kin log likelihood per sample
         sigma_v_pred_samples = self.sigma_v_pred_from_kin_pred(
             proposed_cosmo, index_likelihood_list, lambda_int_samples)
-        # TODO: test jitting this
-        if USE_JAX:
-            sigma_v_log_likelihoods = jax_utils.jax_sigma_v_log_likelihood_per_samp(
-                jnp.asarray(sigma_v_pred_samples),
-                jnp.asarray(data_vector_global[index_likelihood_list]['sigma_v_measured']),
-                jnp.asarray(data_vector_global[index_likelihood_list]['sigma_v_likelihood_prec']),
-                jnp.asarray(data_vector_global[index_likelihood_list]['sigma_v_likelihood_prefactors']))
-            sigma_v_log_likelihoods = np.asarray(sigma_v_log_likelihoods)
-        else:
-            sigma_v_log_likelihoods = self.sigma_v_log_likelihood_per_samp(
-                sigma_v_pred_samples, index_likelihood_list
-            )
+        sigma_v_log_likelihoods = self.sigma_v_log_likelihood_per_samp(
+            sigma_v_pred_samples, index_likelihood_list
+        )
 
         # reweighting factor
         # NOTE: hardcoding of hyperparameter order!! (-2 is mu, -1 is sigma)
         if self.use_gamma_info:
-            eval_at_proposed_nu = norm.logpdf(data_vector_global[index_likelihood_list]['gamma_pred_samples'],
-                                              loc=hyperparameters[-2] ,scale=hyperparameters[-1])
-            rw_factor = eval_at_proposed_nu - data_vector_global[index_likelihood_list]['log_prob_gamma_samps_nu_int']
+            rw_factor = self.compute_rw_factor(hyperparameters,index_likelihood_list)
         else:
             rw_factor = 0.
 
-        if self.cosmo_model in ['LCDM_lambda_int_beta_ani' ,'w0waCDM_lambda_int_beta_ani']:
+        if self.cosmo_model in ['LCDM_lambda_int_beta_ani',
+            'w0waCDM_lambda_int_beta_ani','w0waCDM_fullcPDF']:
+
+            # extract proposed mean/stddev of beta_ani 
+            if self.cosmo_model == 'w0waCDM_fullcPDF':
+                proposed_loc = hyperparameters[6]
+                proposed_scale = hyperparameters[7]
+            else:
+                proposed_loc = hyperparameters[-4]
+                proposed_scale = hyperparameters[-3]
+
+            # compare proposed prob to modeling prior prob
             eval_at_proposed_beta_pop = norm.logpdf(data_vector_global[index_likelihood_list]['beta_ani_samples'],
-                                                    loc=hyperparameters[-4] ,scale=hyperparameters[-3])
-            beta_rw_factor = eval_at_proposed_beta_pop - data_vector_global[index_likelihood_list]['log_prob_beta_ani_samps_nu_int']
+                loc=proposed_loc,scale=proposed_scale)
+            beta_rw_factor = (eval_at_proposed_beta_pop - 
+                data_vector_global[index_likelihood_list]['log_prob_beta_ani_samps_nu_int'])
+            # additive in log space
             rw_factor += beta_rw_factor
 
-        # TODO: testing some jitting here (jit doesn't like the ==0 statement)
-
-        if USE_JAX:
-            individ_likelihood = jax_utils.jax_fpd_samp_summation(jnp.asarray(
-                td_log_likelihoods +sigma_v_log_likelihoods +rw_factor))
-            individ_likelihood = np.asarray(individ_likelihood)
-
-        else:
-            # sum across fpd samples
-            individ_likelihood = np.mean(
-                np.exp(td_log_likelihoods +sigma_v_log_likelihoods +rw_factor),
-                axis=1)
-
+        individ_likelihood = np.mean(
+            np.exp(td_log_likelihoods +sigma_v_log_likelihoods +rw_factor),
+            axis=1)
+        
+        
         # sum over all lenses
         # TODO: there is a way to do this in jax
-        if jnp.sum(individ_likelihood == 0) > 0:
+        if np.sum(individ_likelihood == 0) > 0:
             log_likelihood = -jnp.inf
 
-        if USE_JAX:
-            log_likelihood = jax_utils.jax_lenses_summation(jnp.asarray(individ_likelihood))
         else:
             log_likelihood = np.sum(np.log(individ_likelihood))
 
-        return log_likelihood
 
+        return log_likelihood
+    
 
 #########################
 # Sampling Implementation
 #########################
+
 def LCDM_log_prior(hyperparameters):
     """
     Args:
@@ -629,11 +723,11 @@ def w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
         return -np.inf
     elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
         return -np.inf
-    #w0 [-2,0]
-    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
+    #w0 [-3,1]
+    elif hyperparameters[2] < -3 or hyperparameters[2] > 1:
         return -np.inf
-    #wa [-2,2]
-    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
+    #wa [-4,4]
+    elif hyperparameters[3] < -4 or hyperparameters[3] > 4:
         return -np.inf
     elif hyperparameters[4] < 0.5 or hyperparameters[4] > 1.5: #mu(lambda_int)
         return -np.inf
@@ -650,12 +744,213 @@ def w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
     
     return 0
 
-def generate_initial_state(n_walkers,cosmo_model):
+def tdcosmo25_lambda_int_beta_ani_log_prior(hyperparameters):
+    """
+    Args:
+        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
+            mu_gamma,sigma_gamma])
+    """
+
+    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+        return -np.inf
+    elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+        return -np.inf
+    #w0 [-1.5,0.5]
+    elif hyperparameters[2] < -1.5 or hyperparameters[2] > 0.5:
+        return -np.inf
+    #wa [-10,10]
+    elif hyperparameters[3] < -10 or hyperparameters[3] > 10:
+        return -np.inf
+    elif hyperparameters[4] < 0.5 or hyperparameters[4] > 1.5: #mu(lambda_int)
+        return -np.inf
+    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.5: #sigma(lambda_int)
+        return -np.inf
+    elif hyperparameters[6] < -0.5 or hyperparameters[6] > 0.5: #mu(beta_ani)
+        return -np.inf
+    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.2: #sigma(beta_ani)
+        return -np.inf
+    elif hyperparameters[8] < 1.5 or hyperparameters[8] > 2.5: #mu(gamma_lens)
+        return -np.inf
+    elif hyperparameters[9] < 0.001 or hyperparameters[9] > 0.2: #sigma(gamma_lens)
+        return -np.inf
+    
+    return 0
+
+def OmegaM_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
+    """Include approximation of Pantheon+ Prior used in TDCOSMO 2025 (https://arxiv.org/pdf/2506.03023)
+        Note page 17: "Pantheon+ effectively provided a prior on Ωm (i.e., Ωm = 0.334 ± 0.018)"
+    """
+
+    # returns 0 or -np.inf
+    within_bounds = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+
+    if within_bounds == 0:   
+        # note we center our ground truth at 0.3     
+        return norm.logpdf(hyperparameters[1],loc=0.3,scale=0.018)
+
+    else:
+        return within_bounds
+        
+
+def INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
+
+    # returns 0 or -np.inf
+    within_bounds = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+
+    if within_bounds == 0:
+        # this cov matrix is hardcoded, taken from a gold-only chain
+        # we only evaluate on the last 4 params, so this is only a prior
+        # on lambda_int and beta_ani...
+        # (This is only used for a redshift configuration test...)
+        HARCODED_COV = np.asarray([[ 6.12374896e+00, -2.15141853e-02, -5.71087181e-01,
+            6.32316635e-01,  6.94284277e-03,  2.95354324e-06,
+            -1.26510967e-02,  1.61769785e-03],
+        [-2.15141853e-02,  8.55982425e-03, -1.62265553e-02,
+            -5.83908439e-02, -1.32491066e-03, -2.36135703e-05,
+            -8.11721417e-05, -2.57776450e-04],
+        [-5.71087181e-01, -1.62265553e-02,  1.19990785e-01,
+            -3.55331429e-02,  4.35775938e-03,  1.29247499e-04,
+            9.69690762e-04,  2.02107237e-04],
+        [ 6.32316635e-01, -5.83908439e-02, -3.55331429e-02,
+            1.29002622e+00,  3.60024828e-03, -4.88360131e-04,
+            7.42754178e-04,  3.08261219e-03],
+        [ 6.94284277e-03, -1.32491066e-03,  4.35775938e-03,
+            3.60024828e-03,  5.62846938e-04,  9.40058479e-06,
+            -7.31255777e-05,  2.98668773e-05],
+        [ 2.95354324e-06, -2.36135703e-05,  1.29247499e-04,
+            -4.88360131e-04,  9.40058479e-06,  1.13811882e-04,
+            9.53635163e-06,  8.34327893e-06],
+        [-1.26510967e-02, -8.11721417e-05,  9.69690762e-04,
+            7.42754178e-04, -7.31255777e-05,  9.53635163e-06,
+            6.78136734e-04,  4.25489473e-05],
+        [ 1.61769785e-03, -2.57776450e-04,  2.02107237e-04,
+            3.08261219e-03,  2.98668773e-05,  8.34327893e-06,
+            4.25489473e-05,  7.58572080e-04]])
+            
+        HARDCODED_MEAN = np.asarray([ 70.,  0.3, -1.,  0.,
+            1.,  0.1,  0.,  0.1])
+        
+        return multivariate_normal.logpdf(hyperparameters[4:8],
+            mean=HARDCODED_MEAN[4:],cov=HARCODED_COV[4:,4:])
+
+    else:
+        return within_bounds
+        
+
+
+def w0waCDM_fullcPDF_log_prior(hyperparameters):
+    """
+    Args:
+        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
+            mu_gamma,sigma_gamma])
+    """
+
+    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+        return -np.inf
+    elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+        return -np.inf
+    #w0 [-2,0]
+    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
+        return -np.inf
+    #wa [-2,2]
+    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
+        return -np.inf
+    elif hyperparameters[4] < 0.5 or hyperparameters[4] > 1.5: #mu(lambda_int)
+        return -np.inf
+    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.5: #sigma(lambda_int)
+        return -np.inf
+    elif hyperparameters[6] < -0.5 or hyperparameters[6] > 0.5: #mu(beta_ani)
+        return -np.inf
+    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.2: #sigma(beta_ani)
+        return -np.inf
+    # LENS PARAMS
+    elif hyperparameters[8] < 1.5 or hyperparameters[8] > 2.5: #mu(gamma_lens)
+        return -np.inf
+    elif hyperparameters[9] < 0.001 or hyperparameters[9] > 0.2: #sigma(gamma_lens)
+        return -np.inf
+    elif hyperparameters[10] < 0.2 or hyperparameters[10] > 2.0: #mu(theta_E)
+        return -np.inf
+    elif hyperparameters[11] < 0.001 or hyperparameters[11] > 0.7: #sigma(theta_E)
+        return -np.inf
+    elif hyperparameters[12] < 0.001 or hyperparameters[12] > 0.1: #sigma(gamma1/2)
+        return -np.inf
+    elif hyperparameters[13] < 0.001 or hyperparameters[13] > 0.2: #sigma(e1/2)
+        return -np.inf
+    
+    return 0
+
+def w0waCDM_fullcPDF_noKIN_log_prior(hyperparameters):
+    """
+    Args:
+        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
+            mu_gamma,sigma_gamma])
+    """
+
+    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
+        return -np.inf
+    elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
+        return -np.inf
+    #w0 [-2,0]
+    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
+        return -np.inf
+    #wa [-2,2]
+    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
+        return -np.inf
+    # LENS PARAMS
+    elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5: #mu(gamma_lens)
+        return -np.inf
+    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(gamma_lens)
+        return -np.inf
+    elif hyperparameters[6] < 0.2 or hyperparameters[6] > 2.0: #mu(theta_E)
+        return -np.inf
+    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.7: #sigma(theta_E)
+        return -np.inf
+    elif hyperparameters[8] < 0.001 or hyperparameters[8] > 0.1: #sigma(gamma1/2)
+        return -np.inf
+    elif hyperparameters[9] < 0.001 or hyperparameters[9] > 0.2: #sigma(e1/2)
+        return -np.inf
+    
+    return 0
+
+
+def dynesty_prior_transform(uniform_draw):
+    """Transforms the uniform random variable `u ~ Unif[0., 1.)`
+    to the parameter of interest `x ~ Unif[-10., 10.)`."""
+
+    x = uniform_draw
+    # H0
+    x[0] = 150*x[0] # scale to [0,150.]
+    # OmegaM
+    x[1] = 0.45*x[1] + 0.05 # scale to [0,.45], shift to [0.05,0.5]
+    # w0
+    x[2] = 2*x[2] - 2. # scale to [0,2.], shift to [-2,0.]
+    # wa
+    x[3] = 4*x[3] - 2. # scale to [0,4.], shift to [-2,2.]
+    #mu(lambda_int)
+    x[4] = x[4] + 0.5 # scale to [0,1.], shift to [0.5,1.5]
+    # sigma(lambda_int)
+    x[5] = 0.499*x[5] + 0.001 # scale to [0,0.499], shift to [0.001,0.5]
+    # mu(beta_ani)
+    x[6] = x[6] - 0.5 # scale to [0,1.], shift to [-0.5,0.5]
+    # sigma(beta_ani)
+    x[7] = 0.199*x[7] + 0.001 # scale to [0,0.199], shift to [0.001,0.2]
+    # mu(gamma_lens)
+    x[8] = x[8] + 1.5 # scale to [0,1.], shift to [1.5,2.5]
+    # sigma(gamma_lens)
+    x[9] = 0.199*x[9] + 0.001 # scale to [0,0.199], shift to [0.001,0.2]
+
+    return x
+
+def generate_initial_state(n_walkers,cosmo_model,use_tdcosmo25=False,
+        random_seed=None):
     """
     Args:
         n_walkers (int): number of emcee walkers
         cosmo_model (string): 'LCDM' or 'w0waCDM'
     """
+
+    if random_seed is not None:
+        np.random.seed(random_seed)
 
     if cosmo_model == 'LCDM':
         # order: [H0,Omega_M,mu_gamma,sigma_gamma]
@@ -713,7 +1008,11 @@ def generate_initial_state(n_walkers,cosmo_model):
         cur_state = np.empty((n_walkers,10))
         cur_state[:,0] = norm.rvs(loc=70.,scale=5.,size=n_walkers) #h0
         cur_state[:,1] = truncnorm.rvs(-.3/.1,.2/0.1,loc=0.3,scale=0.1,size=n_walkers) #Omega_M
-        cur_state[:,2] = truncnorm.rvs(-1/.2,1/.2,loc=-1.,scale=0.2,size=n_walkers) #w0
+        # NOTE: out of bounds for TDCOSMO25 prior! 
+        if use_tdcosmo25:
+            cur_state[:,2] = truncnorm.rvs(-0.5/0.2,1.5/0.2,loc=-1.,scale=0.2,size=n_walkers) #w0
+        else:
+            cur_state[:,2] = truncnorm.rvs(-1/.2,1/.2,loc=-1.,scale=0.2,size=n_walkers) #w0
         cur_state[:,3] = truncnorm.rvs(-1/.2,1/.2,loc=0.,scale=0.2,size=n_walkers) #wa
         cur_state[:,4] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=1.,scale=0.1,size=n_walkers) # mu(lambda_int)
         cur_state[:,5] = uniform.rvs(loc=0.01,scale=0.49,size=n_walkers)
@@ -723,10 +1022,57 @@ def generate_initial_state(n_walkers,cosmo_model):
         cur_state[:,9] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
 
         return cur_state
+    
+    if cosmo_model == 'w0waCDM_fullcPDF':
+        # TODO: try this one with intializing with a compact ball!
+        # order: [H0,Omega_M,w0,wa,mu_lambda_int,sigma_lambda_int,
+        #   mu_beta_ani,sigma_beta_ani,mu_gamma,sigma_gamma]
+        cur_state = np.empty((n_walkers,14))
+        cur_state[:,0] = norm.rvs(loc=70.,scale=5.,size=n_walkers) #h0
+        cur_state[:,1] = truncnorm.rvs(-.3/.1,.2/0.1,loc=0.3,scale=0.1,size=n_walkers) #Omega_M
+        cur_state[:,2] = truncnorm.rvs(-1/.2,1/.2,loc=-1.,scale=0.2,size=n_walkers) #w0
+        cur_state[:,3] = truncnorm.rvs(-1/.2,1/.2,loc=0.,scale=0.2,size=n_walkers) #wa
+        cur_state[:,4] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=1.,scale=0.1,size=n_walkers) # mu(lambda_int)
+        cur_state[:,5] = uniform.rvs(loc=0.01,scale=0.49,size=n_walkers)
+        cur_state[:,6] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=0.,scale=0.1,size=n_walkers) # mu(beta_ani)
+        cur_state[:,7] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+        cur_state[:,8] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=2.,scale=0.1,size=n_walkers) # mu(gamma_lens)
+        cur_state[:,9] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+        cur_state[:,10] = truncnorm.rvs(-3.,3.,loc=0.8,scale=0.2,size=n_walkers) # mu(theta_E)
+        cur_state[:,11] = uniform.rvs(loc=0.01,scale=0.49,size=n_walkers)
+        cur_state[:,12] = uniform.rvs(loc=0.01,scale=0.09,size=n_walkers) # sigma(gamma1/2)
+        cur_state[:,13] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers) # sigma(e1/2)
 
+        return cur_state
+    
+    if cosmo_model == 'w0waCDM_fullcPDF_noKIN':
+        # TODO: try this one with intializing with a compact ball!
+        # order: [H0,Omega_M,w0,wa,mu_lambda_int,sigma_lambda_int,
+        #   mu_beta_ani,sigma_beta_ani,mu_gamma,sigma_gamma]
+        cur_state = np.empty((n_walkers,10))
+        cur_state[:,0] = norm.rvs(loc=70.,scale=5.,size=n_walkers) #h0
+        cur_state[:,1] = truncnorm.rvs(-.3/.1,.2/0.1,loc=0.3,scale=0.1,size=n_walkers) #Omega_M
+        cur_state[:,2] = truncnorm.rvs(-1/.2,1/.2,loc=-1.,scale=0.2,size=n_walkers) #w0
+        cur_state[:,3] = truncnorm.rvs(-1/.2,1/.2,loc=0.,scale=0.2,size=n_walkers) #wa
+        cur_state[:,4] = truncnorm.rvs(-0.5/0.1,0.5/0.1,loc=2.,scale=0.1,size=n_walkers) # mu(gamma_lens)
+        cur_state[:,5] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers)
+        cur_state[:,6] = truncnorm.rvs(-3.,3.,loc=0.8,scale=0.2,size=n_walkers) # mu(theta_E)
+        cur_state[:,7] = uniform.rvs(loc=0.01,scale=0.49,size=n_walkers)
+        cur_state[:,8] = uniform.rvs(loc=0.01,scale=0.09,size=n_walkers) # sigma(gamma1/2)
+        cur_state[:,9] = uniform.rvs(loc=0.01,scale=0.19,size=n_walkers) # sigma(e1/2)
 
+        return cur_state
 
-def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
+def log_likelihood(hyperparameters,tdc_likelihood_list):
+    """Iterate through sub-samples and add together log-likelihood
+    """
+    fll = 0
+    for i, tdc_likelihood in enumerate(tdc_likelihood_list):
+        fll += tdc_likelihood.full_log_likelihood(hyperparameters, index_likelihood_list = i)
+    return fll
+
+def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
+    use_informative=False,use_OmegaM=False,use_tdcosmo25=False):
     """
     Args:
         hyperparameters ([float]): 
@@ -748,89 +1094,29 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list):
     elif cosmo_model == 'w0waCDM':
         lp = w0waCDM_log_prior(hyperparameters)
     elif cosmo_model == 'w0waCDM_lambda_int_beta_ani':
-        lp = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+        if use_informative:
+            lp = INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+        elif use_OmegaM:
+            lp = OmegaM_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+        elif use_tdcosmo25:
+            lp = tdcosmo25_lambda_int_beta_ani_log_prior(hyperparameters)
+        else:
+            lp = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+    elif cosmo_model == 'w0waCDM_fullcPDF':
+        lp = w0waCDM_fullcPDF_log_prior(hyperparameters)
+    elif cosmo_model == 'w0waCDM_fullcPDF_noKIN':
+        lp = w0waCDM_fullcPDF_noKIN_log_prior(hyperparameters)
     # Likelihood
-    if lp == 0:
-        for i, tdc_likelihood in enumerate(tdc_likelihood_list):
-            fll = tdc_likelihood.full_log_likelihood(hyperparameters, index_likelihood_list = i)
-            lp += fll
+    if not math.isinf(lp):
+        lp += log_likelihood(hyperparameters,tdc_likelihood_list)
 
     return lp
 
-def prepare_data_vector_list(data_vector_list, tdc_likelihood_list):
-    """
-    Args:
-        data_vector_list ([DataVector]): list of data vector objects (dictionnary)
-    """
-
-    print("Preparing data vector list for sampling...")
-
-    #expand the axis according to the number of samples in the data vector
-    for i in range(len(data_vector_list)):
-        #expand the axis according to the number of samples in the data vector
-        num_lenses, num_fpd_samples, dim_fpd= data_vector_list[i]['fpd_samples'].shape
-        data_vector_list[i]['td_measured'] = np.repeat(data_vector_list[i]['td_measured'][:, np.newaxis, :],
-                num_fpd_samples, axis=1)
-        data_vector_list[i]['td_likelihood_prec'] = np.repeat(data_vector_list[i]['td_likelihood_prec'][:, np.newaxis, :, :],
-            num_fpd_samples, axis=1)
-
-        data_vector_list[i]['td_likelihood_prefactors'] = np.log( (1/(2*np.pi)**(dim_fpd/2)) /
-                np.sqrt(np.linalg.det(np.linalg.inv(data_vector_list[i]['td_likelihood_prec']))) )
-
-        # evaluate the modeling prior for gamma_lens from a provided distribution or on the provided samples
-        if tdc_likelihood_list[i].log_prob_gamma_nu_int is None:
-            #default prior
-            log_prob_modeling_prior = uniform.logpdf(data_vector_list[i]['gamma_pred_samples'], loc=1., scale=2.)
-
-        else:
-            log_prob_modeling_prior = np.empty((data_vector_list[i]['gamma_pred_samples'].shape))
-            for j in range(0, data_vector_list[i]['gamma_pred_samples'].shape[0]):
-                log_prob_modeling_prior[i, :] = tdc_likelihood_list[i].log_prob_gamma_nu_int(data_vector_list[i]['gamma_pred_samples'][j])
-
-        data_vector_list[i]['log_prob_modeling_prior'] = log_prob_modeling_prior
-
-        if isinstance(tdc_likelihood_list[i], TDCKinLikelihood):
-            #expand the axis according to the number of samples in the data vector
-            if 'kin_pred_samples' in data_vector_list[i]:
-                num_kin_bins = data_vector_list[i]['kin_pred_samples'].shape[2]
-                # pad measurements with a 2nd batch dim for # of fpd samples
-                data_vector_list[i]['sigma_v_measured'] = np.repeat(
-                    data_vector_list[i]['sigma_v_measured'][:, np.newaxis, :],
-                    num_fpd_samples, axis=1)
-                data_vector_list[i]['sigma_v_likelihood_prec'] = np.repeat(
-                    data_vector_list[i]['sigma_v_likelihood_prec'][:, np.newaxis, :, :],
-                    num_fpd_samples, axis=1)
-
-                data_vector_list[i]['sigma_v_likelihood_prefactors'] = np.log((1 / (2 * np.pi) ** (num_kin_bins / 2)) /
-                                                                              np.sqrt(np.linalg.det(np.linalg.inv(
-                                                                                  data_vector_list[i][
-                                                                                      'sigma_v_likelihood_prec']))))
-            else:
-                raise ValueError('kin_pred_samples not found in data_vector_list whereas TDCKinLikelihood is used')
-
-
-            if tdc_likelihood_list[i].cosmo_model in ['LCDM_lambda_int_beta_ani' ,'w0waCDM_lambda_int_beta_ani']:
-                # check that beta_ani_samples are provided...
-                if not 'beta_ani_samples' in data_vector_list[i] or data_vector_list[i]['beta_ani_samples'] is None:
-                    raise ValueError('Must provide beta_ani_samples if using  '+
-                                     'beta_ani in cosmo_model')
-
-                # evaluate the modeling prior from a provided distribution or on the provided samples
-                if tdc_likelihood_list[i].log_prob_beta_ani_nu_int is None:
-                    # default: assume un-informative prior
-                    data_vector_list[i]['log_prob_beta_ani_nu_int'] = uniform.logpdf(
-                        data_vector_list[i]['beta_ani_samples'],loc=-0.5 ,scale=1.)
-                else:
-                    # user-provided modeling prior
-                    data_vector_list[i]['log_prob_beta_ani_nu_int'] = np.empty((data_vector_list[i]['beta_ani_samples'].shape))
-                    for j in range(0, data_vector_list[i]['beta_ani_samples'].shape[0]):
-                        data_vector_list[i]['log_prob_beta_ani_nu_int'][j, :] = tdc_likelihood_list[i].log_prob_beta_ani_nu_int(
-                            data_vector_list[i]['beta_ani_samples'][j])
-
-    return data_vector_list
 
 def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
-    n_walkers=20, use_mpi=False, use_multiprocess=False, backend_path=None, reset_backend=True):
+    n_walkers=20, use_mpi=False, use_multiprocess=False, backend_path=None, 
+    reset_backend=True,sampler_type='emcee',use_informative=False,
+    use_OmegaM=False,use_tdcosmo25=False,init_seed=None):
     """
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
@@ -838,10 +1124,15 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
         num_emcee_samps (int): Number of iterations for MCMC inference
         n_walkers (int): Number of emcee walkers
         use_mpi (bool): If True, uses MPI for parallelization
-        backend_path (string): If not None, saves a backend .h5 file
+        backend_path (string): If not None, saves a backend .h5 file. 
+            Otherwise, returns the chain.
+        sampler_type (string): 'emcee' or 'dynesty'
+        use_informative, use_OmegaM: Boolean flags, control the use of informative priors...
+        init_seed (int or None): if specified, seeds the random 
+            initialization of walkers
         
     Returns: 
-        mcmc chain (emcee.EnsemblerSampler.chain)
+        mcmc chain (emcee.EnsemblerSampler.chain or dynesty.NestedSampler.)
     """
 
     # Retrieve cosmo_model from likelihood object?
@@ -849,63 +1140,101 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     for i in range(1,len(tdc_likelihood_list)):
         if tdc_likelihood_list[i].cosmo_model != cosmo_model:
             raise ValueError("")
+        
 
-    # TODO: prepare the data vectors
+    # dynesty only works with one model rn because of a hardcoded prior transform
+    if sampler_type == 'dynesty' and cosmo_model != 'w0waCDM_lambda_int_beta_ani':
+        raise ValueError('dynesty sampling not implemented for chosen cosmology')
 
     # make the variable global to speed up multiprocessing access during the sampling
     global data_vector_global
     data_vector_global = data_vector_list
 
     log_posterior_fn = partial(log_posterior, cosmo_model=cosmo_model,
+        tdc_likelihood_list=tdc_likelihood_list,use_informative=use_informative,
+        use_OmegaM=use_OmegaM,use_tdcosmo25=use_tdcosmo25)
+    # need this fnc for dynesty
+    log_likelihood_fn = partial(log_likelihood,
         tdc_likelihood_list=tdc_likelihood_list)
+    
+    # TODO testing likelihood evaluation
+    #hyperparameters = [70.,0.3,-1.,0.,1.,0.1,0.,0.1,2.,0.2]
+    #print('log likelihood 1', log_likelihood(hyperparameters,tdc_likelihood_list))
+    #log_likelihood(hyperparameters,tdc_likelihood_list)
 
     # generate initial state
-    cur_state = generate_initial_state(n_walkers,cosmo_model)
-
-    print('Initial likelihood call : ')
-    if cosmo_model == 'LCDM_lambda_int_beta_ani':
-        hyperparameters_init = [6.47242793e+01, 2.33623746e-01, 9.14884078e-01, 1.34268817e-01,
-                            -3.15238075e-02, 8.41097628e-02, 2.22904902e+00, 8.78549539e-03]
-    elif cosmo_model == 'w0waCDM_lambda_int_beta_ani':
-        hyperparameters_init = [6.47242793e+01, 2.33623746e-01, -1., 0., 9.14884078e-01, 1.34268817e-01,
-                            -3.15238075e-02, 8.41097628e-02, 2.22904902e+00, 8.78549539e-03]
-    print('hyperparameters_init', hyperparameters_init)
-    log_post_val = log_posterior(hyperparameters_init, cosmo_model,
-                  tdc_likelihood_list)
-    print('log_posterior', log_post_val)
+    cur_state = generate_initial_state(n_walkers,cosmo_model,
+        use_tdcosmo25=use_tdcosmo25,
+        random_seed=init_seed)
 
     # emcee stuff here
     if not use_mpi:
         backend = None
-        if backend_path is not None:
+        if backend_path is not None and sampler_type == 'emcee':
             backend = emcee.backends.HDFBackend(backend_path)
             # if False, will pick-up where chain left off
             if reset_backend:
                 backend.reset(n_walkers,cur_state.shape[1])
-
+        
+        # Single node multiprocessing
         if use_multiprocess:
             from multiprocess import Pool, cpu_count
             cpu_count = cpu_count()
             print("Using multiprocessing for parallelization...")
             print("Number of CPUs: %d" % cpu_count)
             with Pool() as pool:
-                sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
-                    log_posterior_fn,backend=backend, pool=pool)
 
+                if sampler_type == 'emcee':
+                    sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
+                        log_posterior_fn, pool=pool, backend=backend)
+                    # run mcmc
+                    tik_mcmc = time.time()
+                    if not reset_backend and backend is not None:
+                        # init_state=None will have it pick-up where it left off?
+                        _ = sampler.run_mcmc(None,nsteps=num_emcee_samps,progress=False)
+                    else:
+                        _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
+                    tok_mcmc = time.time()
+                    print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+                elif sampler_type == 'dynesty':
+                    sampler = dynesty.NestedSampler(loglikelihood=log_likelihood_fn,
+                        prior_transform=dynesty_prior_transform,
+                        ndim=10) # TODO: fix hard-coding of ndim for dynesty!!!!!
+                    sampler.run_nested(maxiter=num_emcee_samps,
+                        checkpoint_file=backend_path,checkpoint_every=60)
+
+        # No multiprocessing
+        else:
+
+            if sampler_type == 'emcee':
+                sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
+                    log_posterior_fn, backend=backend)
                 # run mcmc
                 tik_mcmc = time.time()
-                _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
+                if not reset_backend and backend is not None:
+                    # init_state=None will have it pick-up where it left off?
+                    _ = sampler.run_mcmc(None,nsteps=num_emcee_samps,progress=True)
+                else:
+                    _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=True)
                 tok_mcmc = time.time()
                 print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
-        else:
-            sampler = emcee.EnsembleSampler(n_walkers, cur_state.shape[1],
-                                            log_posterior_fn, backend=backend)
 
-            # run mcmc
-            tik_mcmc = time.time()
-            _ = sampler.run_mcmc(cur_state, nsteps=num_emcee_samps, progress=True)
-            tok_mcmc = time.time()
-            print("Avg. Time per MCMC Step: %.3f seconds" % ((tok_mcmc - tik_mcmc) / num_emcee_samps))
+            elif sampler_type == 'dynesty':
+                # TODO: test with dynamic nested sampler instead...
+                # bound='single', sample='unif',rstate=rstate
+                dsampler = dynesty.DynamicNestedSampler(loglikelihood=log_likelihood_fn,
+                    prior_transform=dynesty_prior_transform,
+                    ndim=10, bound='single', sample='unif')
+                #sampler = dynesty.NestedSampler(loglikelihood=log_likelihood_fn,
+                #    prior_transform=dynesty_prior_transform,
+                #    ndim=10) # TODO: fix hard-coding of ndim for dynesty!!!!!
+                print('checkpointing to: ', backend_path)
+                dsampler.run_nested(maxiter=num_emcee_samps,
+                    checkpoint_file=backend_path,checkpoint_every=10)
+                #sampler.run_nested(maxiter=num_emcee_samps,
+                #    checkpoint_file=backend_path,checkpoint_every=10)
+
+    # MPI
     else: 
         print("Using MPI for parallelization...")
         from schwimmbad import MPIPool
@@ -925,17 +1254,28 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
                 #    last_pos = backend.get_last_sample()#.coords
                 #    cur_state = last_pos
 
-            sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
-                log_posterior_fn, pool=pool, backend=backend)
-            
-            # run mcmc
-            tik_mcmc = time.time()
-            if not reset_backend and backend is not None:
-                # init_state=None will have it pick-up where it left off?
-                _ = sampler.run_mcmc(None,nsteps=num_emcee_samps,progress=False)
-            else:
-                _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
-            tok_mcmc = time.time()
-            print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
-        
-    return sampler.get_chain()
+            if sampler_type == 'emcee':
+                sampler = emcee.EnsembleSampler(n_walkers,cur_state.shape[1],
+                    log_posterior_fn, pool=pool, backend=backend)
+                # run mcmc
+                tik_mcmc = time.time()
+                if not reset_backend and backend is not None:
+                    # init_state=None will have it pick-up where it left off?
+                    _ = sampler.run_mcmc(None,nsteps=num_emcee_samps,progress=False)
+                else:
+                    _ = sampler.run_mcmc(cur_state,nsteps=num_emcee_samps,progress=False)
+                tok_mcmc = time.time()
+                print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
+     
+            elif sampler_type == 'dynesty':
+                sampler = dynesty.NestedSampler(loglikelihood=log_likelihood_fn,
+                    prior_transform=dynesty_prior_transform,
+                    ndim=10) # TODO: fix hard-coding of ndim for dynesty!!!!!
+                sampler.run_nested(maxiter=num_emcee_samps,
+                    checkpoint_file=backend_path,checkpoint_every=60)
+                
+                results = sampler.results
+                samples_equal = results.samples_equal()
+
+    if backend_path is None:
+        return sampler.get_chain()
