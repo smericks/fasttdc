@@ -7,8 +7,9 @@ import h5py
 import json
 from scipy.stats import norm, multivariate_normal, truncnorm
 import sys
-sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/')
-from Experiments.lsst_forecast.DataVectors.prep_data_vectors import gaussianize_samples
+import os
+dirname = os.path.dirname(__file__)
+sys.path.insert(0, os.path.join(dirname, '../..'))
 import tdc_sampler
 import time 
 import copy
@@ -27,9 +28,10 @@ print(type(z_lens_mean))
 z_src_mean = args.z_src
 use_MPI = args.use_MPI
 use_multiprocess = args.use_multiprocess
+OMEGA_M_PRIOR = True
 
 # backend path
-backend_path = 'InferenceRuns/FOM_vs_z/redshift_zlens=%.2f_zsrc=%.2f_backend.h5'%(z_lens_mean,z_src_mean)
+backend_path = 'InferenceRuns/FOM_vs_z/OmegaM_redshift_zlens=%.2f_zsrc=%.2f_backend.h5'%(z_lens_mean,z_src_mean)
 
 
 # RANDOM SEED FOR REPRODUCIBILITY
@@ -63,8 +65,10 @@ def modify_data_vector_dict720(z_lens,z_src,kin_meas_error_percent=0.01,
     data_vector_dict_lens720['z_src'] = np.asarray([z_src])
 
     # constants
-    from astropy.cosmology import FlatLambdaCDM
+    from astropy.cosmology import FlatLambdaCDM, w0waCDM
     gt_cosmo_astropy = FlatLambdaCDM(H0=70.,Om0=0.3)
+    # DESI + CMB in Table V of DESI DRII COSMO PAPER
+    #gt_cosmo_astropy = w0waCDM(H0=63.6, Om0=0.35, Ode0=0.65, w0=-0.42, wa=-1.75)
 
     td_meas_error_percent = 0.01
     td_meas_error_days = None
@@ -155,7 +159,7 @@ for dv_dict in data_vector_dict_list:
 
 # tdc_sampler likelihood object
 
-NUM_MCMC_EPOCHS = 100
+NUM_MCMC_EPOCHS = 10000 # don't need as many b/c few lenses + informative prior
 NUM_MCMC_WALKERS = 50
 
 start = time.time()
@@ -164,13 +168,15 @@ add_one_lens_chain = tdc_sampler.fast_TDC(likelihood_obj_list,data_vector_dict_l
     n_walkers=NUM_MCMC_WALKERS,
     use_mpi=use_MPI, use_multiprocess=use_multiprocess,
     use_informative=True,
-    backend_path=backend_path)
+    backend_path=backend_path,
+    use_OmegaM=OMEGA_M_PRIOR)
 end = time.time()
 print('Time to run MCMC:',end-start)
 
 # save the chain!!!
 
 
+# TODO: this might only be fair without the informative prior on beta_ani, lambda_int ...
 # ordering is: fpd, kin, time-delay
 # baseline (3%, 3%, 3%)
 

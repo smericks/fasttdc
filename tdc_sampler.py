@@ -552,7 +552,13 @@ class TDCKinLikelihood(TDCLikelihood):
         return data_vector_global[index_likelihood_list]['sigma_v_likelihood_prefactors'] + exponent
     
 
-    def full_log_likelihood(self, hyperparameters, index_likelihood_list):
+    def full_log_likelihood(self, hyperparameters, index_likelihood_list,
+        print_debug=False, data_vector_list=None):
+
+        # option for debugging without running fast_TDC
+        if data_vector_list is not None:
+            global data_vector_global
+            data_vector_global = data_vector_list
 
         # construct cosmology from hyperparameters
         proposed_cosmo, lambda_int_samples = self.process_hyperparam_proposal(
@@ -603,6 +609,8 @@ class TDCKinLikelihood(TDCLikelihood):
             np.exp(td_log_likelihoods +sigma_v_log_likelihoods +rw_factor),
             axis=1)
         
+        if print_debug:
+            print('individ. lens likelihood (NOT log): ', individ_likelihood)
         
         # sum over all lenses
         # TODO: there is a way to do this in jax
@@ -723,11 +731,11 @@ def w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
         return -np.inf
     elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
         return -np.inf
-    #w0 [-3,1]
-    elif hyperparameters[2] < -3 or hyperparameters[2] > 1:
+    #w0 [-2,0]
+    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
         return -np.inf
-    #wa [-4,4]
-    elif hyperparameters[3] < -4 or hyperparameters[3] > 4:
+    #wa [-2,2]
+    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
         return -np.inf
     elif hyperparameters[4] < 0.5 or hyperparameters[4] > 1.5: #mu(lambda_int)
         return -np.inf
@@ -793,6 +801,12 @@ def OmegaM_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
         
 
 def INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
+    """
+    Used for redshift configuration test. Only evaluates on params 4-8 
+        (mu_lambda_int,sigma_lambda_int,mu_beta_ani,sigma_beta_ani). 
+    An informative prior on these params to simulate being within a larger
+        population inference...
+    """
 
     # returns 0 or -np.inf
     within_bounds = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
@@ -801,7 +815,6 @@ def INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
         # this cov matrix is hardcoded, taken from a gold-only chain
         # we only evaluate on the last 4 params, so this is only a prior
         # on lambda_int and beta_ani...
-        # (This is only used for a redshift configuration test...)
         HARCODED_COV = np.asarray([[ 6.12374896e+00, -2.15141853e-02, -5.71087181e-01,
             6.32316635e-01,  6.94284277e-03,  2.95354324e-06,
             -1.26510967e-02,  1.61769785e-03],
@@ -836,6 +849,16 @@ def INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
     else:
         return within_bounds
         
+
+def OmegaM_INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
+    
+    log_prob = INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+
+    # multiply in p(Omega_M)
+    if np.isfinite(log_prob):
+        log_prob += norm.logpdf(hyperparameters[1],loc=0.3,scale=0.018)
+
+    return log_prob
 
 
 def w0waCDM_fullcPDF_log_prior(hyperparameters):
@@ -1084,6 +1107,7 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
     #rank = MPI.COMM_WORLD.Get_rank()
     #pid = os.getpid()
     #print(f"[Rank {rank} | PID {pid}] Evaluating log-posterior at {hyperparameters}")
+
     # Prior
     if cosmo_model == 'LCDM':
         lp = LCDM_log_prior(hyperparameters)
@@ -1094,8 +1118,10 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
     elif cosmo_model == 'w0waCDM':
         lp = w0waCDM_log_prior(hyperparameters)
     elif cosmo_model == 'w0waCDM_lambda_int_beta_ani':
-        if use_informative:
+        if use_informative: # for redshift configuration test...
             lp = INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+            if use_OmegaM:
+                lp = OmegaM_INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
         elif use_OmegaM:
             lp = OmegaM_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
         elif use_tdcosmo25:
