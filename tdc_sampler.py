@@ -69,25 +69,41 @@ class TDCLikelihood():
     # requires an assumed cosmology (from hyperparameters) and redshifts
 
 
-    def td_pred_from_fpd_pred(self, proposed_cosmo, index_likelihood_list, lambda_int_samples=None, ):
+    def td_pred_from_fpd_pred(self, proposed_cosmo, data_vector_dict=None, 
+            global_data_vector_idx=None, lambda_int_samples=None):
         """
         Args:
             proposed_cosmo (default: jax_cosmo.Cosmology): built by
                 construct_proposed_cosmo() (see below)
+            data_vector_dict ({'key': np.array()}, default=None): contains:
+                'z_lens', 'z_src', 'fpd_samples'
+            global_data_vector_idx (int, default=None)
             lambda_int_samples (): shape=(num_lenses,num_fpd_samples)
+
+        Notes: pass data_vector_dict directly OR index into a globally set list 
+            with global_data_vector_idx. Cannot do both.
+            
 
         Returns:
             td_pred_samples (size:(n_lenses,n_samples,3))
         """
 
+        # check whether using global data vectors or passing directly...
+        if global_data_vector_idx is not None:
+            # make sure we're not trying to do two things at once
+            if data_vector_dict is not None:
+                raise ValueError('pass data vector OR index into global data vector, not both')
+            # retrieve globally stored data vectors
+            data_vector_dict = data_vector_global[global_data_vector_idx]
+
         if self.use_astropy:
             Ddt_computed = tdc_utils.ddt_from_redshifts(proposed_cosmo,
-                                                        data_vector_global[index_likelihood_list]['z_lens'],
-                                                        data_vector_global[index_likelihood_list]['z_src'])
+                                                        data_vector_dict['z_lens'],
+                                                        data_vector_dict['z_src'])
         else:
             Ddt_computed = tdc_utils.jax_ddt_from_redshifts(proposed_cosmo,
-                                                            data_vector_global[index_likelihood_list]['z_lens'],
-                                                            data_vector_global[index_likelihood_list]['z_src'])
+                                                            data_vector_dict['z_lens'],
+                                                            data_vector_dict['z_src'])
 
         Ddt_computed = np.array(Ddt_computed)
         # add batch dimensions for Ddt computed...
@@ -96,7 +112,7 @@ class TDCLikelihood():
         Ddt_repeated = np.repeat(Ddt_repeated[:, :, np.newaxis],
                                  self.dim_fpd, axis=2)
         # compute predicted time delays (this function should work w/ arrays)
-        td_pred = tdc_utils.td_from_ddt_fpd(Ddt_repeated, data_vector_global[index_likelihood_list]['fpd_samples'])
+        td_pred = tdc_utils.td_from_ddt_fpd(Ddt_repeated, data_vector_dict['fpd_samples'])
 
         # Account for mass sheets:
         #   td = lambda * td
@@ -108,14 +124,15 @@ class TDCLikelihood():
                                             self.dim_fpd, axis=2)
             td_pred *= lambda_int_repeated
         # Scaling if kappa_ext is present...
-        if data_vector_global[index_likelihood_list]['kappa_ext_samples'] is not None:
-            kappa_ext_repeated = np.repeat(data_vector_global[index_likelihood_list]['kappa_ext_samples'][:, :, np.newaxis],
+        if data_vector_dict['kappa_ext_samples'] is not None:
+            kappa_ext_repeated = np.repeat(data_vector_dict['kappa_ext_samples'][:, :, np.newaxis],
                                            self.dim_fpd, axis=2)
             td_pred *= (1 - kappa_ext_repeated)
 
         return td_pred
 
-    def td_log_likelihood_per_samp(self, td_pred_samples, index_likelihood_list):
+    def td_log_likelihood_per_samp(self, td_pred_samples, data_vector_dict=None, 
+            global_data_vector_idx=None,):
         """
         Args:
             td_pred_samples (n_lenses,n_fpd_samps,3)
@@ -124,18 +141,26 @@ class TDCLikelihood():
             td_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
         """
 
-        x_minus_mu = (td_pred_samples - data_vector_global[index_likelihood_list]['td_measured'])
+        # check whether using global data vectors or passing directly...
+        if global_data_vector_idx is not None:
+            # make sure we're not trying to do two things at once
+            if data_vector_dict is not None:
+                raise ValueError('pass data vector OR index into global data vector, not both')
+            # retrieve globally stored data vectors
+            data_vector_dict = data_vector_global[global_data_vector_idx]
+
+        x_minus_mu = (td_pred_samples - data_vector_dict['td_measured'])
         # add dimension s.t. x_minus_mu is 2D
         x_minus_mu = np.expand_dims(x_minus_mu, axis=-1)
         # matmul should condense the (# of time delays) dim.
         exponent = -0.5 * np.matmul(np.transpose(x_minus_mu, axes=(0, 1, 3, 2)),
-                                    np.matmul(data_vector_global[index_likelihood_list]['td_likelihood_prec'], x_minus_mu))
+                                    np.matmul(data_vector_dict['td_likelihood_prec'], x_minus_mu))
 
         # reduce to two dimensions: (n_lenses,n_fpd_samples)
         exponent = np.squeeze(exponent)
 
         # log-likelihood
-        return data_vector_global[index_likelihood_list]['td_likelihood_prefactors'] + exponent
+        return data_vector_dict['td_likelihood_prefactors'] + exponent
 
 
     def construct_proposed_cosmo(self, hyperparameters):
@@ -220,7 +245,8 @@ class TDCLikelihood():
 
         return self.construct_proposed_cosmo(hyperparameters), lambda_int_samples
 
-    def full_log_likelihood(self, hyperparameters, index_likelihood_list):
+    def full_log_likelihood(self, hyperparameters, data_vector_dict=None, 
+            global_data_vector_idx=None):
         """
         Args:
             hyperparameters ([H0,mu_gamma,sigma_gamma] or [H0,w0,wa,mu_gamma,sigma_gamma])
@@ -233,16 +259,19 @@ class TDCLikelihood():
             hyperparameters)
 
         # td_pred_samples from fpd_pred_samples
-        td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo, index_likelihood_list,
-                                                     lambda_int_samples)
+        td_pred_samples = self.td_pred_from_fpd_pred(proposed_cosmo, data_vector_dict=data_vector_dict, 
+            global_data_vector_idx=global_data_vector_idx,lambda_int_samples=lambda_int_samples)
+        # td likelihood for every sample from every lens
         td_log_likelihoods = self.td_log_likelihood_per_samp(
-            td_pred_samples, index_likelihood_list
+            td_pred_samples, data_vector_dict=data_vector_dict, 
+            global_data_vector_idx=global_data_vector_idx
         )
 
         # reweighting factor
         # TODO: fix this for new framework
         if self.use_gamma_info:
-            rw_factor = self.compute_rw_factor(hyperparameters,index_likelihood_list)
+            rw_factor = self.compute_rw_factor(hyperparameters,data_vector_dict=data_vector_dict, 
+                global_data_vector_idx=global_data_vector_idx)
         else:
             rw_factor = 0.
 
@@ -257,11 +286,29 @@ class TDCLikelihood():
 
         return log_likelihood
     
-    def compute_rw_factor(self,hyperparameters,index_likelihood_list):
+    def compute_rw_factor(self,hyperparameters,data_vector_dict=None, 
+                global_data_vector_idx=None):
+        """ Re-weighting for pop model (nu) vs. interim prior (nu_int)
+        Args: 
+            hyperparameters ():
+            data_vector_dict ():
+            global_data_vector_idx ():
+
+        Returns:
+            rw_factor ():
+        """
+
+        # check whether using global data vectors or passing directly...
+        if global_data_vector_idx is not None:
+            # make sure we're not trying to do two things at once
+            if data_vector_dict is not None:
+                raise ValueError('pass data vector OR index into global data vector, not both')
+            # retrieve globally stored data vectors
+            data_vector_dict = data_vector_global[global_data_vector_idx]
 
         # retrieve interim hypermodel
-        nu_means = data_vector_global[index_likelihood_list]['lens_params_nu_int_means']
-        nu_stddevs = data_vector_global[index_likelihood_list]['lens_params_nu_int_stddevs']
+        nu_means = data_vector_dict['lens_params_nu_int_means']
+        nu_stddevs = data_vector_dict['lens_params_nu_int_stddevs']
 
         if nu_means is not None:
 
@@ -309,12 +356,12 @@ class TDCLikelihood():
 
             # TODO: check if this returns the right dimensional thing
             eval_at_proposed_nu = multivariate_normal.logpdf(
-                data_vector_global[index_likelihood_list]['lens_param_samples'],
+                data_vector_dict['lens_param_samples'],
                 mean=nu_means,
                 cov=np.diag(nu_stddevs**2))
 
             rw_factor = (eval_at_proposed_nu - 
-                data_vector_global[index_likelihood_list]['log_prob_lens_param_samps_nu_int'])
+                data_vector_dict['log_prob_lens_param_samps_nu_int'])
             
         else: 
             # uniform interim prior!!
@@ -343,7 +390,7 @@ class TDCLikelihood():
 
                 # this is directly the rw_factor, there is no interim prior to subtract off...
                 rw_factor = multivariate_normal.logpdf(
-                    data_vector_global[index_likelihood_list]['lens_param_samples'][:,:,:6],
+                    data_vector_dict['lens_param_samples'][:,:,:6],
                     mean=nu_means,cov=np.diag(nu_stddevs**2))
 
 
@@ -370,7 +417,7 @@ class TDCLikelihood():
 
                 # this is directly the rw_factor, there is no interim prior to subtract off...
                 rw_factor = multivariate_normal.logpdf(
-                    data_vector_global[index_likelihood_list]['lens_param_samples'][:,:,:6],
+                    data_vector_dict['lens_param_samples'][:,:,:6],
                     mean=nu_means,cov=np.diag(nu_stddevs**2))
 
             else: # all other models
@@ -380,7 +427,7 @@ class TDCLikelihood():
 
                 # this is directly the rw_factor, there is no interim prior to subtract off...
                 rw_factor = norm.logpdf(
-                    data_vector_global[index_likelihood_list]['lens_param_samples'][:,:,3],
+                    data_vector_dict['lens_param_samples'][:,:,3],
                     loc=gamma_mean,scale=gamma_stddev)
                 
             
@@ -482,7 +529,8 @@ class TDCKinLikelihood(TDCLikelihood):
         self.num_kin_bins = kin_pred_samples_shape[2]
 
 
-    def sigma_v_pred_from_kin_pred(self ,proposed_cosmo,index_likelihood_list, lambda_int_samples=None):
+    def sigma_v_pred_from_kin_pred(self ,proposed_cosmo, data_vector_dict=None, 
+            global_data_vector_idx=None, lambda_int_samples=None):
         """
         Args:
             proposed_cosmo (default: jax_cosmo.Cosmology): built by
@@ -490,16 +538,24 @@ class TDCKinLikelihood(TDCLikelihood):
             lambda_int_samples (): shape=(num_lenses,num_fpd_samples)
         """
 
+        # check whether using global data vectors or passing directly...
+        if global_data_vector_idx is not None:
+            # make sure we're not trying to do two things at once
+            if data_vector_dict is not None:
+                raise ValueError('pass data vector OR index into global data vector, not both')
+            # retrieve globally stored data vectors
+            data_vector_dict = data_vector_global[global_data_vector_idx]
+
         if self.use_astropy:
             Ds_div_Dds_computed = tdc_utils.kin_distance_ratio(
-                proposed_cosmo , data_vector_global[index_likelihood_list]['z_lens'],
-                data_vector_global[index_likelihood_list]['z_src'])
+                proposed_cosmo , data_vector_dict['z_lens'],
+                data_vector_dict['z_src'])
 
             # raise ValueError("astropy option not implemented for TDC+Kin")
         else:
             Ds_div_Dds_computed = tdc_utils.jax_kin_distance_ratio(
-                proposed_cosmo, data_vector_global[index_likelihood_list]['z_lens'],
-                data_vector_global[index_likelihood_list]['z_src'])
+                proposed_cosmo, data_vector_dict['z_lens'],
+                data_vector_dict['z_src'])
 
         Ds_div_Dds_computed = np.array(Ds_div_Dds_computed)
         # add batch dimensions for fpd_samples
@@ -509,7 +565,7 @@ class TDCKinLikelihood(TDCLikelihood):
         Ds_div_Dds_repeated = np.repeat(Ds_div_Dds_repeated[:, :, np.newaxis],
                                         self.num_kin_bins, axis=2)
         # scale the kin_pred with cosmology term: sigma_v = sqrt(Ds/Dds)*c*sqrt(mathcal{J})
-        sigma_v_pred = np.sqrt(Ds_div_Dds_repeated ) *data_vector_global[index_likelihood_list]['kin_pred_samples']
+        sigma_v_pred = np.sqrt(Ds_div_Dds_repeated ) *data_vector_dict['kin_pred_samples']
 
         # Account for mass sheets:
         #   sigma_v = sqrt(lambda) * sigma_v
@@ -521,15 +577,16 @@ class TDCKinLikelihood(TDCLikelihood):
                                             self.num_kin_bins, axis=2)
             sigma_v_pred *= np.sqrt(lambda_int_repeated)
         # sqrt(1-kappa_ext) scaling
-        if data_vector_global[index_likelihood_list]['kappa_ext_samples'] is not None:
-            kappa_ext_repeated = np.repeat(data_vector_global[index_likelihood_list]['kappa_ext_samples'][: ,: ,np.newaxis],
+        if data_vector_dict['kappa_ext_samples'] is not None:
+            kappa_ext_repeated = np.repeat(data_vector_dict['kappa_ext_samples'][: ,: ,np.newaxis],
                                            self.num_kin_bins, axis=2)
             sigma_v_pred *= np.sqrt(1 - kappa_ext_repeated)
 
         return sigma_v_pred
 
-    # TODO: jaxify & jit
-    def sigma_v_log_likelihood_per_samp(self,sigma_v_pred_samples, index_likelihood_list):
+
+    def sigma_v_log_likelihood_per_samp(self,sigma_v_pred_samples, data_vector_dict=None, 
+            global_data_vector_idx=None):
         """
         Args:
             sigma_v_pred_samples (n_lenses,n_fpd_samps,num_kin_bins)
@@ -538,27 +595,38 @@ class TDCKinLikelihood(TDCLikelihood):
             sigma_v_log_likelihood_per_fpd_samp (n_lenses,n_fpd_samps)
         """
 
-        x_minus_mu = (sigma_v_pred_samples -data_vector_global[index_likelihood_list]['sigma_v_measured'])
+        # check whether using global data vectors or passing directly...
+        if global_data_vector_idx is not None:
+            # make sure we're not trying to do two things at once
+            if data_vector_dict is not None:
+                raise ValueError('pass data vector OR index into global data vector, not both')
+            # retrieve globally stored data vectors
+            data_vector_dict = data_vector_global[global_data_vector_idx]
+
+        x_minus_mu = (sigma_v_pred_samples - data_vector_dict['sigma_v_measured'])
         # add dimension s.t. x_minus_mu is 2D
         x_minus_mu = np.expand_dims(x_minus_mu ,axis=-1)
         # matmul should condense the (# of time delays) dim.
         exponent = -0.5 *np.matmul(np.transpose(x_minus_mu ,axes=(0 ,1 ,3 ,2)),
-                                  np.matmul(data_vector_global[index_likelihood_list]['sigma_v_likelihood_prec'],x_minus_mu))
+                                  np.matmul(data_vector_dict['sigma_v_likelihood_prec'],x_minus_mu))
 
         # reduce to two dimensions: (n_lenses,n_fpd_samples)
         exponent = np.squeeze(exponent)
 
         # log-likelihood
-        return data_vector_global[index_likelihood_list]['sigma_v_likelihood_prefactors'] + exponent
+        return data_vector_dict['sigma_v_likelihood_prefactors'] + exponent
     
 
-    def full_log_likelihood(self, hyperparameters, index_likelihood_list,
-        print_debug=False, data_vector_list=None):
+    def full_log_likelihood(self, hyperparameters, data_vector_dict=None, 
+            global_data_vector_idx=None,print_debug=False):
+        """Evaluate full log likelihood (for td and kin) and sum across all lenses
+        Args:
+            hyperparameters ():
+            data_vector_dict ():
+            global_data_vector_idx ():
 
-        # option for debugging without running fast_TDC
-        if data_vector_list is not None:
-            global data_vector_global
-            data_vector_global = data_vector_list
+        Returns:
+        """
 
         # construct cosmology from hyperparameters
         proposed_cosmo, lambda_int_samples = self.process_hyperparam_proposal(
@@ -566,25 +634,32 @@ class TDCKinLikelihood(TDCLikelihood):
 
         # td log likelihood per sample
         td_pred_samples = self.td_pred_from_fpd_pred(
-            proposed_cosmo, index_likelihood_list, lambda_int_samples)
+            proposed_cosmo, data_vector_dict=data_vector_dict, 
+                global_data_vector_idx=global_data_vector_idx, 
+                lambda_int_samples=lambda_int_samples)
         td_log_likelihoods = self.td_log_likelihood_per_samp(
-            td_pred_samples, index_likelihood_list
-        )
+            td_pred_samples, data_vector_dict=data_vector_dict, 
+            global_data_vector_idx=global_data_vector_idx)
         td_log_likelihoods = np.asarray(td_log_likelihoods)
 
         # kin log likelihood per sample
         sigma_v_pred_samples = self.sigma_v_pred_from_kin_pred(
-            proposed_cosmo, index_likelihood_list, lambda_int_samples)
+            proposed_cosmo, data_vector_dict=data_vector_dict, 
+            global_data_vector_idx=global_data_vector_idx, 
+            lambda_int_samples=lambda_int_samples)
         sigma_v_log_likelihoods = self.sigma_v_log_likelihood_per_samp(
-            sigma_v_pred_samples, index_likelihood_list
+            sigma_v_pred_samples, data_vector_dict=data_vector_dict, 
+                global_data_vector_idx=global_data_vector_idx
         )
 
         # reweighting factor
         # NOTE: hardcoding of hyperparameter order!! (-2 is mu, -1 is sigma)
         if self.use_gamma_info:
-            rw_factor = self.compute_rw_factor(hyperparameters,index_likelihood_list)
+            rw_factor = self.compute_rw_factor(hyperparameters,data_vector_dict=data_vector_dict, 
+                global_data_vector_idx=global_data_vector_idx)
         else:
             rw_factor = 0.
+
 
         if self.cosmo_model in ['LCDM_lambda_int_beta_ani',
             'w0waCDM_lambda_int_beta_ani','w0waCDM_fullcPDF']:
@@ -597,11 +672,19 @@ class TDCKinLikelihood(TDCLikelihood):
                 proposed_loc = hyperparameters[-4]
                 proposed_scale = hyperparameters[-3]
 
+            # retrieve beta_ani samples from either global data vector or provided data vector
+            if data_vector_dict is not None:
+                beta_ani_samples = data_vector_dict['beta_ani_samples']
+                beta_interim_log_prob = data_vector_dict['log_prob_beta_ani_samps_nu_int']
+            elif global_data_vector_idx is not None:
+                beta_ani_samples = data_vector_global[global_data_vector_idx]['beta_ani_samples']
+                beta_interim_log_prob = data_vector_global[global_data_vector_idx]['log_prob_beta_ani_samps_nu_int']
+
             # compare proposed prob to modeling prior prob
-            eval_at_proposed_beta_pop = norm.logpdf(data_vector_global[index_likelihood_list]['beta_ani_samples'],
+            eval_at_proposed_beta_pop = norm.logpdf(beta_ani_samples,
                 loc=proposed_loc,scale=proposed_scale)
             beta_rw_factor = (eval_at_proposed_beta_pop - 
-                data_vector_global[index_likelihood_list]['log_prob_beta_ani_samps_nu_int'])
+                beta_interim_log_prob)
             # additive in log space
             rw_factor += beta_rw_factor
 
@@ -1091,7 +1174,7 @@ def log_likelihood(hyperparameters,tdc_likelihood_list):
     """
     fll = 0
     for i, tdc_likelihood in enumerate(tdc_likelihood_list):
-        fll += tdc_likelihood.full_log_likelihood(hyperparameters, index_likelihood_list = i)
+        fll += tdc_likelihood.full_log_likelihood(hyperparameters, global_data_vector_idx = i)
     return fll
 
 def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
@@ -1147,6 +1230,8 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
             (will add log likelihoods together)
+        data_vector_list ([{'key': np.array()}]): list of dictionaries
+            containing key/value pairs that store data vectors as np.arrays()
         num_emcee_samps (int): Number of iterations for MCMC inference
         n_walkers (int): Number of emcee walkers
         use_mpi (bool): If True, uses MPI for parallelization
