@@ -125,19 +125,19 @@ class TDCSamplerTests(unittest.TestCase):
         # TODO: fix all of these tests for the new formatting
         dbl_lklhd = tdc_sampler.TDCLikelihood(
             fpd_sample_shape=np.shape(self.data_vector_dict_dbls['fpd_samples']),
-            cosmo_model='LCDM',use_gamma_info=False) # TODO: gamma_info on or off?
+            cosmo_model='LCDM',use_gamma_info=True) # TODO: gamma_info on or off?
         
         quad_lklhd = tdc_sampler.TDCLikelihood(
             fpd_sample_shape=np.shape(self.data_vector_dict_quads['fpd_samples']),
-            cosmo_model='LCDM',use_gamma_info=False)
+            cosmo_model='LCDM',use_gamma_info=True)
         
         dbl_lklhd_w0wa = tdc_sampler.TDCLikelihood(
             fpd_sample_shape=np.shape(self.data_vector_dict_dbls['fpd_samples']),
-            cosmo_model='w0waCDM',use_gamma_info=False)
+            cosmo_model='w0waCDM',use_gamma_info=True)
         
         quad_lklhd_w0wa = tdc_sampler.TDCLikelihood(
             fpd_sample_shape=np.shape(self.data_vector_dict_quads['fpd_samples']),
-            cosmo_model='w0waCDM',use_gamma_info=False)
+            cosmo_model='w0waCDM',use_gamma_info=True)
         
         # FUNCTION 1: td_log_likelihood_per_samp
         td_pred_samples = self.data_vector_dict_dbls['fpd_samples']*1.2 # just random vals.
@@ -145,7 +145,6 @@ class TDCSamplerTests(unittest.TestCase):
             td_pred_samples,data_vector_dict=self.data_vector_dict_dbls)        
         # test that shape of output is (num_lenses,num_fpd_samples)
         for i,s in enumerate([1,5]):
-            print('shape: ',np.shape(td_pred_samples))
             # testing the two shape dimensions one at a time...
             self.assertEqual(np.shape(likelihood_per_samp)[i],s)
 

@@ -61,8 +61,6 @@ class TDCLikelihood():
                 'z_src' shape=(n_lenses)
         """
 
-        # no processing needed (np.squeeze ensures any dimensions of size 1
-        #    are removed)
         if cosmo_model not in ['LCDM', 'LCDM_lambda_int',
                                'LCDM_lambda_int_beta_ani', 'w0waCDM', 
                                'w0waCDM_lambda_int_beta_ani',
@@ -135,7 +133,7 @@ class TDCLikelihood():
                                             self.dim_fpd, axis=2)
             td_pred *= lambda_int_repeated
         # Scaling if kappa_ext is present...
-        if data_vector_dict['kappa_ext_samples'] is not None:
+        if 'kappa_ext_samples' in data_vector_dict.keys():
             kappa_ext_repeated = np.repeat(data_vector_dict['kappa_ext_samples'][:, :, np.newaxis],
                                            self.dim_fpd, axis=2)
             td_pred *= (1 - kappa_ext_repeated)
@@ -168,7 +166,8 @@ class TDCLikelihood():
                                     np.matmul(data_vector_dict['td_likelihood_prec'], x_minus_mu))
 
         # reduce to two dimensions: (n_lenses,n_fpd_samples)
-        # edge case: what if only one lens...
+        # reduce only the last two dims to avoid edge cases (i.e. what if only one lens...)
+        exponent = np.squeeze(exponent,axis=-1)
         exponent = np.squeeze(exponent,axis=-1)
 
         # log-likelihood
@@ -318,130 +317,79 @@ class TDCLikelihood():
             # retrieve globally stored data vectors
             data_vector_dict = data_vector_global[global_data_vector_idx]
 
-        # retrieve interim hypermodel
-        nu_means = data_vector_dict['lens_params_nu_int_means']
-        nu_stddevs = data_vector_dict['lens_params_nu_int_stddevs']
 
-        if nu_means is not None:
+        # modify into proposed hypermodel
+        if self.cosmo_model == 'w0waCDM_fullcPDF':
+            nu_means = np.empty(6)
+            nu_stddevs = np.empty(6)
 
-            # modify into proposed hypermodel
-            if self.cosmo_model == 'w0waCDM_fullcPDF':
-                # theta_E
-                nu_means[0] = hyperparameters[10]
-                nu_stddevs[0] = hyperparameters[11]
-                # external shear (gamma1,gamma2)
-                nu_means[1] = 0.
-                nu_means[2] = 0.
-                nu_stddevs[1] = hyperparameters[12]
-                nu_stddevs[2] = hyperparameters[12]
-                # gamma_lens
-                nu_means[3] = hyperparameters[8]
-                nu_stddevs[3] = hyperparameters[9]
-                # ellipticity (e1,e2) 
-                nu_means[4] = 0.
-                nu_means[5] = 0.
-                nu_stddevs[4] = hyperparameters[13]
-                nu_stddevs[5] = hyperparameters[13]
+            # theta_E
+            nu_means[0] = hyperparameters[10]
+            nu_stddevs[0] = hyperparameters[11]
+            # external shear (gamma1,gamma2)
+            nu_means[1] = 0.
+            nu_means[2] = 0.
+            nu_stddevs[1] = hyperparameters[12]
+            nu_stddevs[2] = hyperparameters[12]
+            # gamma_lens
+            nu_means[3] = hyperparameters[8]
+            nu_stddevs[3] = hyperparameters[9]
+            # ellipticity (e1,e2) 
+            nu_means[4] = 0.
+            nu_means[5] = 0.
+            nu_stddevs[4] = hyperparameters[13]
+            nu_stddevs[5] = hyperparameters[13]
 
-            elif self.cosmo_model == 'w0waCDM_fullcPDF_noKIN': 
-                # theta_E
-                nu_means[0] = hyperparameters[6]
-                nu_stddevs[0] = hyperparameters[7]
-                # external shear (gamma1,gamma2)
-                nu_means[1] = 0.
-                nu_means[2] = 0.
-                nu_stddevs[1] = hyperparameters[8]
-                nu_stddevs[2] = hyperparameters[8]
-                # gamma_lens
-                nu_means[3] = hyperparameters[4]
-                nu_stddevs[3] = hyperparameters[5]
-                # ellipticity (e1,e2) 
-                nu_means[4] = 0.
-                nu_means[5] = 0.
-                nu_stddevs[4] = hyperparameters[9]
-                nu_stddevs[5] = hyperparameters[9]
-
-            else: # all other models
-                # only change gamma_lens
-                nu_means[3] = hyperparameters[-2]
-                nu_stddevs[3] = hyperparameters[-1]
-
-            # TODO: check if this returns the right dimensional thing
+            # evaluate over 6 lens params
             eval_at_proposed_nu = multivariate_normal.logpdf(
                 data_vector_dict['lens_param_samples'],
                 mean=nu_means,
                 cov=np.diag(nu_stddevs**2))
 
+        elif self.cosmo_model == 'w0waCDM_fullcPDF_noKIN': 
+            nu_means = np.empty(6)
+            nu_stddevs = np.empty(6)
+
+            # theta_E
+            nu_means[0] = hyperparameters[6]
+            nu_stddevs[0] = hyperparameters[7]
+            # external shear (gamma1,gamma2)
+            nu_means[1] = 0.
+            nu_means[2] = 0.
+            nu_stddevs[1] = hyperparameters[8]
+            nu_stddevs[2] = hyperparameters[8]
+            # gamma_lens
+            nu_means[3] = hyperparameters[4]
+            nu_stddevs[3] = hyperparameters[5]
+            # ellipticity (e1,e2) 
+            nu_means[4] = 0.
+            nu_means[5] = 0.
+            nu_stddevs[4] = hyperparameters[9]
+            nu_stddevs[5] = hyperparameters[9]
+
+            # evaluate over 6 lens params
+            eval_at_proposed_nu = multivariate_normal.logpdf(
+                data_vector_dict['lens_param_samples'],
+                mean=nu_means,
+                cov=np.diag(nu_stddevs**2))
+
+        else: # all other models assume a population over gamma_lens by default
+            gamma_mean = hyperparameters[-2]
+            gamma_stddev = hyperparameters[-1]
+
+            # just evaluate over one param (gamma_lens is at index 3)
+            eval_at_proposed_nu = norm.logpdf(
+                data_vector_dict['lens_param_samples'][:,:,3],
+                loc=gamma_mean,scale=gamma_stddev)
+
+        # compute the rw factor by comparing to interim prior 
+        if 'log_prob_lens_param_samps_nu_int' in data_vector_dict.keys():
+            # informative interim prior specified 
             rw_factor = (eval_at_proposed_nu - 
                 data_vector_dict['log_prob_lens_param_samps_nu_int'])
-            
-        else: 
-            # uniform interim prior!!
-
-            # modify into proposed hypermodel
-            if self.cosmo_model == 'w0waCDM_fullcPDF':
-                nu_means = np.empty(6)
-                nu_stddevs = np.empty(6)
-
-                # theta_E
-                nu_means[0] = hyperparameters[10]
-                nu_stddevs[0] = hyperparameters[11]
-                # external shear (gamma1,gamma2)
-                nu_means[1] = 0.
-                nu_means[2] = 0.
-                nu_stddevs[1] = hyperparameters[12]
-                nu_stddevs[2] = hyperparameters[12]
-                # gamma_lens
-                nu_means[3] = hyperparameters[8]
-                nu_stddevs[3] = hyperparameters[9]
-                # ellipticity (e1,e2) 
-                nu_means[4] = 0.
-                nu_means[5] = 0.
-                nu_stddevs[4] = hyperparameters[13]
-                nu_stddevs[5] = hyperparameters[13]
-
-                # this is directly the rw_factor, there is no interim prior to subtract off...
-                rw_factor = multivariate_normal.logpdf(
-                    data_vector_dict['lens_param_samples'][:,:,:6],
-                    mean=nu_means,cov=np.diag(nu_stddevs**2))
-
-
-            elif self.cosmo_model == 'w0waCDM_fullcPDF_noKIN': 
-                nu_means = np.empty(6)
-                nu_stddevs = np.empty(6)
-    
-                # theta_E
-                nu_means[0] = hyperparameters[6]
-                nu_stddevs[0] = hyperparameters[7]
-                # external shear (gamma1,gamma2)
-                nu_means[1] = 0.
-                nu_means[2] = 0.
-                nu_stddevs[1] = hyperparameters[8]
-                nu_stddevs[2] = hyperparameters[8]
-                # gamma_lens
-                nu_means[3] = hyperparameters[4]
-                nu_stddevs[3] = hyperparameters[5]
-                # ellipticity (e1,e2) 
-                nu_means[4] = 0.
-                nu_means[5] = 0.
-                nu_stddevs[4] = hyperparameters[9]
-                nu_stddevs[5] = hyperparameters[9]
-
-                # this is directly the rw_factor, there is no interim prior to subtract off...
-                rw_factor = multivariate_normal.logpdf(
-                    data_vector_dict['lens_param_samples'][:,:,:6],
-                    mean=nu_means,cov=np.diag(nu_stddevs**2))
-
-            else: # all other models
-                # only change gamma_lens
-                gamma_mean = hyperparameters[-2]
-                gamma_stddev = hyperparameters[-1]
-
-                # this is directly the rw_factor, there is no interim prior to subtract off...
-                rw_factor = norm.logpdf(
-                    data_vector_dict['lens_param_samples'][:,:,3],
-                    loc=gamma_mean,scale=gamma_stddev)
-                
+        else:
+            # uniform / uninformative interim prior
+            rw_factor = eval_at_proposed_nu
             
         return rw_factor
 
@@ -486,7 +434,9 @@ class TDCLikelihood():
                                         np.matmul(td_likelihood_prec, x_minus_mu))
 
             # reduce to one dimension: (n_fpd_samples)
-            exponent = np.squeeze(exponent)
+            # reduce only the last two dims to avoid edge cases (i.e. what if only one sample...)
+            exponent = np.squeeze(exponent,axis=-1)
+            exponent = np.squeeze(exponent,axis=-1)
 
             imp_samp_likelihood = np.mean(np.exp(td_likelihood_prefactor + exponent))
 
@@ -600,7 +550,7 @@ class TDCKinLikelihood(TDCLikelihood):
                                             self.num_kin_bins, axis=2)
             sigma_v_pred *= np.sqrt(lambda_int_repeated)
         # sqrt(1-kappa_ext) scaling
-        if data_vector_dict['kappa_ext_samples'] is not None:
+        if 'kappa_ext_samples' in data_vector_dict.keys():
             kappa_ext_repeated = np.repeat(data_vector_dict['kappa_ext_samples'][: ,: ,np.newaxis],
                                            self.num_kin_bins, axis=2)
             sigma_v_pred *= np.sqrt(1 - kappa_ext_repeated)
@@ -634,7 +584,9 @@ class TDCKinLikelihood(TDCLikelihood):
                                   np.matmul(data_vector_dict['sigma_v_likelihood_prec'],x_minus_mu))
 
         # reduce to two dimensions: (n_lenses,n_fpd_samples)
-        exponent = np.squeeze(exponent)
+        # reduce only the last two dims to avoid edge cases (i.e. what if only one lens...)
+        exponent = np.squeeze(exponent,axis=-1)
+        exponent = np.squeeze(exponent,axis=-1)
 
         # log-likelihood
         return data_vector_dict['sigma_v_likelihood_prefactors'] + exponent
