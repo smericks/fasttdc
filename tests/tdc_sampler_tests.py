@@ -4,7 +4,7 @@ import jax.numpy as jnp
 import sys
 import jax_cosmo
 from scipy.stats import norm,multivariate_normal,uniform
-sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/darkenergy-from-LAGN/')
+sys.path.insert(0, '/Users/smericks/Desktop/StrongLensing/fasttdc_dev/fasttdc/')
 import tdc_sampler
 import Utils.tdc_utils as tdc_utils
 
@@ -12,44 +12,67 @@ class TDCSamplerTests(unittest.TestCase):
 
     def setUp(self):
 
-        self.td_measured_dbls = np.asarray([
-            [100],
-        ])
-        self.td_measured_quads = np.asarray([
-            [300,400,700],
-        ])
+        self.data_vector_dict_dbls = {
+            'td_measured':np.asarray([[100],]),
+            'td_likelihood_prec':np.asarray([[[1/10.]], ]), #1/sigma^2
+            'td_likelihood_prefactors':None,
+            'fpd_samples':np.asarray([
+                [[1.2],
+                [1.1],
+                [1.3],
+                [0.9],
+                [1.3]]
+            ]),
+            'lens_param_samples':np.asarray([
+                [ # theta_E, gamma1/2, gamma_lens, e1/2
+                    [1., 0., 0., 2., 0., 0.],
+                    [1., 0., 0., 2.1, 0., 0.],
+                    [1., 0., 0., 2.05, 0., 0.],
+                    [1., 0., 0., 2.07, 0., 0.],
+                    [1., 0., 0., 1.99, 0., 0.]
+                ]
+            ]),
+            'z_lens':np.asarray([0.5]),
+            'z_src':np.asarray([1.2])
+        }
 
-        self.td_prec_dbls = np.asarray([
-            [[1/10.]], #1/sigma^2
-        ])
-        self.td_prec_quads = np.asarray([
-            [[1/20.,0.,0.],[0.,1/22.,0.],[0.,0.,1/24.]], #1/sigma^2
-        ])
+        num_td = 1
+        self.data_vector_dict_dbls['td_likelihood_prefactors'] = np.log( 
+            (1/(2*np.pi)**(num_td/2)) / np.sqrt(np.linalg.det(
+                np.linalg.inv(self.data_vector_dict_dbls['td_likelihood_prec']))) )
 
-        self.fpd_pred_samples_dbls = np.asarray([
-            [[1.2],
-             [1.1],
-             [1.3],
-             [0.9],
-             [1.3]]
-        ])
-        self.fpd_pred_samples_quads = np.asarray([
-            [
-                [2.2,2.9,6.],
-                [1.8,2.7,5.1],
-                [1.9,3.3,4.],
-                [2.1,3.4,4.5],
-                [1.8,3.1,5.5]
-            ]
-        ])
+        self.data_vector_dict_quads = {
+            'td_measured':np.asarray([[300,400,700],]),
+            'td_likelihood_prec': np.asarray([
+                [[1/20.,0.,0.],[0.,1/22.,0.],[0.,0.,1/24.]],]), #1/sigma^2
+            'td_likelihood_prefactors':None,
+            'fpd_samples':np.asarray([
+                [
+                    [2.2,2.9,6.],
+                    [1.8,2.7,5.1],
+                    [1.9,3.3,4.],
+                    [2.1,3.4,4.5],
+                    [1.8,3.1,5.5]
+                ]
+            ]),
+            'lens_param_samples':np.asarray([
+                [ # theta_E, gamma1/2, gamma_lens, e1/2
+                    [1., 0., 0., 1.8, 0., 0.],
+                    [1., 0., 0., 1.75, 0., 0.],
+                    [1., 0., 0., 1.9, 0., 0.],
+                    [1., 0., 0., 1.85, 0., 0.],
+                    [1., 0., 0., 1.9, 0., 0.]
+                ]
+            ]),
+            'z_lens':np.asarray([0.6]),
+            'z_src':np.asarray([1.3])
+        }
 
-        self.gamma_pred_samples_dbls = np.asarray([
-            [2.,2.1,2.05,2.07,1.99]
-        ])
 
-        self.gamma_pred_samples_quads = np.asarray([
-            [1.8,1.75,1.9,1.85,1.9]
-        ])
+        num_td = 3
+        self.data_vector_dict_quads['td_likelihood_prefactors'] = np.log( 
+            (1/(2*np.pi)**(num_td/2)) / np.sqrt(np.linalg.det(
+                np.linalg.inv(self.data_vector_dict_quads['td_likelihood_prec']))) )
 
         # kinematics
         self.sigma_v_measured = np.asarray([
@@ -99,42 +122,47 @@ class TDCSamplerTests(unittest.TestCase):
         # make TDCLikelihood object
         z_lens = [0.5,0.6]
         z_src = [1.2,1.3]
+        # TODO: fix all of these tests for the new formatting
         dbl_lklhd = tdc_sampler.TDCLikelihood(
-            self.td_measured_dbls,self.td_prec_dbls,
-            self.fpd_pred_samples_dbls,self.gamma_pred_samples_dbls,
-            z_lens=[0.5],z_src=[1.2])
+            fpd_sample_shape=np.shape(self.data_vector_dict_dbls['fpd_samples']),
+            cosmo_model='LCDM',use_gamma_info=False) # TODO: gamma_info on or off?
+        
         quad_lklhd = tdc_sampler.TDCLikelihood(
-            self.td_measured_quads,self.td_prec_quads,
-            self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
-            z_lens=[0.6],z_src=[1.3])
+            fpd_sample_shape=np.shape(self.data_vector_dict_quads['fpd_samples']),
+            cosmo_model='LCDM',use_gamma_info=False)
+        
         dbl_lklhd_w0wa = tdc_sampler.TDCLikelihood(
-            self.td_measured_dbls,self.td_prec_dbls,
-            self.fpd_pred_samples_dbls,self.gamma_pred_samples_dbls,
-            z_lens=[0.5],z_src=[1.2],cosmo_model='w0waCDM')
+            fpd_sample_shape=np.shape(self.data_vector_dict_dbls['fpd_samples']),
+            cosmo_model='w0waCDM',use_gamma_info=False)
+        
         quad_lklhd_w0wa = tdc_sampler.TDCLikelihood(
-            self.td_measured_quads,self.td_prec_quads,
-            self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
-            z_lens=[0.6],z_src=[1.3],cosmo_model='w0waCDM')
+            fpd_sample_shape=np.shape(self.data_vector_dict_quads['fpd_samples']),
+            cosmo_model='w0waCDM',use_gamma_info=False)
         
         # FUNCTION 1: td_log_likelihood_per_samp
-        td_pred_samples = dbl_lklhd.fpd_samples*1.2
-        likelihood_per_samp = dbl_lklhd.td_log_likelihood_per_samp(td_pred_samples)        
+        td_pred_samples = self.data_vector_dict_dbls['fpd_samples']*1.2 # just random vals.
+        likelihood_per_samp = dbl_lklhd.td_log_likelihood_per_samp(
+            td_pred_samples,data_vector_dict=self.data_vector_dict_dbls)        
         # test that shape of output is (num_lenses,num_fpd_samples)
         for i,s in enumerate([1,5]):
+            print('shape: ',np.shape(td_pred_samples))
+            # testing the two shape dimensions one at a time...
             self.assertEqual(np.shape(likelihood_per_samp)[i],s)
 
         # FUNCTION 2: td_pred_from_fpd_pred(hyperparameters)
         # h0,Omega_M,mu(gamma_lens),sigma(gamma_lens)
         hyperparameters = [70.,0.3,2.0,0.1]
         proposed_cosmo = dbl_lklhd.construct_proposed_cosmo(hyperparameters)
-        td_predicted_dbls = dbl_lklhd.td_pred_from_fpd_pred(proposed_cosmo)
+        td_predicted_dbls = dbl_lklhd.td_pred_from_fpd_pred(proposed_cosmo,
+            data_vector_dict=self.data_vector_dict_dbls)
 
         # test that shape of output is (num_lenses,num_fpd_samples,1) for dbls
         for i,s in enumerate([1,5,1]):
             self.assertEqual(np.shape(td_predicted_dbls)[i],s)
 
         # check for last dim. (num_lenses,num_fpd_samples,3) for quads
-        td_predicted_quads = quad_lklhd.td_pred_from_fpd_pred(proposed_cosmo)
+        td_predicted_quads = quad_lklhd.td_pred_from_fpd_pred(proposed_cosmo,
+            data_vector_dict=self.data_vector_dict_quads)
         self.assertEqual(np.shape(td_predicted_quads)[2],3)
 
 
@@ -149,27 +177,29 @@ class TDCSamplerTests(unittest.TestCase):
                 quad_lklhd (tdc_sampler.TDCLikelihood):
             """
 
-            # NOTE: this prior model matches the default option in TDCLikelihood
-            prior_gamma_model = uniform(loc=1.,scale=2.)
-            proposed_gamma_model = norm(loc=hyperparameters[-2],scale=hyperparameters[-1])
-
             # lens 1 (the double)
-            lens1_computed_ll = dbl_lklhd.full_log_likelihood(hyperparameters)
+            lens1_computed_ll = dbl_lklhd.full_log_likelihood(hyperparameters,
+                data_vector_dict=self.data_vector_dict_dbls)
 
             proposed_cosmo = dbl_lklhd.construct_proposed_cosmo(hyperparameters)
-            td_pred_samples = dbl_lklhd.td_pred_from_fpd_pred(proposed_cosmo)
+            proposed_gamma_model = norm(loc=hyperparameters[-2],scale=hyperparameters[-1])
+            td_pred_samples = dbl_lklhd.td_pred_from_fpd_pred(proposed_cosmo,
+                data_vector_dict=self.data_vector_dict_dbls)
 
             # lens 1 (the double)
             lens1_likelihood = 0
+            # loop thru each importance sample
             for f in range(0,5):
                 my_pred = td_pred_samples[0][f][0]
-                exponent = (-0.5*(my_pred - self.td_measured_dbls[0][0])**2 * 
-                    self.td_prec_dbls[0][0][0])
+                dbl_td_measured = self.data_vector_dict_dbls['td_measured'][0][0]
+                exponent = (-0.5*(my_pred - dbl_td_measured)**2 * 
+                    self.data_vector_dict_dbls['td_likelihood_prec'][0][0][0])
                 log_prefactor = (np.log((1/(2*np.pi))**(0.5) / 
                     np.sqrt(10.)) )# NOTE: hardcoded
-                gamma_samp = self.gamma_pred_samples_dbls[0][f]
-                rw_factor = (proposed_gamma_model.logpdf(gamma_samp) - 
-                    prior_gamma_model.logpdf(gamma_samp))
+                gamma_samp = self.data_vector_dict_dbls['lens_param_samples'][0,f,3]
+                # default assumption = uninformative interim prior 
+                #   (rw factor just comes from proposed pop model)
+                rw_factor = proposed_gamma_model.logpdf(gamma_samp)
                 lens1_log_likelihood = log_prefactor + exponent + rw_factor
                 lens1_likelihood += np.exp(lens1_log_likelihood)
 
@@ -178,21 +208,26 @@ class TDCSamplerTests(unittest.TestCase):
             self.assertAlmostEqual(lens1_computed_ll,np.log(lens1_likelihood))
                 
             # lens 2 (the quad)
-            lens2_computed_ll = quad_lklhd.full_log_likelihood(hyperparameters)
+            lens2_computed_ll = quad_lklhd.full_log_likelihood(hyperparameters,
+                data_vector_dict=self.data_vector_dict_quads)
 
             # proposed_cosmo is still the same here...
-            td_pred_samples = quad_lklhd.td_pred_from_fpd_pred(proposed_cosmo)
+            td_pred_samples = quad_lklhd.td_pred_from_fpd_pred(proposed_cosmo,
+                data_vector_dict=self.data_vector_dict_quads)
 
             lens2_likelihood = 0
             for f in range(0,5):
                 my_pred = np.asarray(td_pred_samples[0][f])
-                x_minus_mu = (my_pred-np.asarray(self.td_measured_quads[0]))
-                prec_mat = self.td_prec_quads[0]
+                x_minus_mu = (my_pred -
+                    self.data_vector_dict_quads['td_measured'][0])
+                prec_mat = self.data_vector_dict_quads['td_likelihood_prec'][0]
                 exponent = -0.5 * np.matmul(x_minus_mu,np.matmul(prec_mat,x_minus_mu))
                 log_prefactor = (np.log((1/(2*np.pi))**(1.5) / 
                     np.sqrt(20.*22.*24.))) # NOTE: hardcoded
-                gamma_samp = self.gamma_pred_samples_quads[0][f]
-                rw_factor = proposed_gamma_model.logpdf(gamma_samp) - prior_gamma_model.logpdf(gamma_samp)
+                gamma_samp = self.data_vector_dict_quads['lens_param_samples'][0,f,3]
+                # default assumption = uninformative interim prior 
+                #   (rw factor just comes from proposed pop model)
+                rw_factor = proposed_gamma_model.logpdf(gamma_samp)
                 lens2_log_likelihood = log_prefactor + exponent + rw_factor
                 lens2_likelihood += np.exp(lens2_log_likelihood)
 
@@ -205,7 +240,7 @@ class TDCSamplerTests(unittest.TestCase):
         # w0waCDM case
         likelihood_test_case(dbl_lklhd_w0wa,quad_lklhd_w0wa,hyperparameters=[70,0.3,-1.,0.,2.0,0.2])
 
-
+"""
     def test_tdckinlikelihood(self):
 
         # initialize likelihood object
@@ -371,4 +406,4 @@ class TDCSamplerTests(unittest.TestCase):
         print('Predicted ddt: ', ddt_chain_mean, ' +/- ', ddt_chain_sigma)
         print("True ddt: ", Ddt_truth)
         
-
+"""

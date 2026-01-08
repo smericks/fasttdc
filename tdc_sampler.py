@@ -48,6 +48,17 @@ class TDCLikelihood():
             use_gamma_info (bool): If False, removes reweighting from likelihood
                 evaluation (any population level gamma params should just
                 return the prior then...)
+
+        Note:
+            likelihood evaluation requires an accompanying data_vector_dict 
+            with key/value pairs:
+                'td_measured' shape=(n_lenses,n_td)
+                'td_likelihood_prec' shape=(n_lenses,n_td,n_td)
+                'td_likelihood_prefactors' shape=(n_lenses)
+                'fpd_samples' shape=(n_lenses,n_imp_samples,n_td)
+                'lens_param_samples shape=(n_lenses,n_imp_samples,n_lens_params)
+                'z_lens' shape=(n_lenses)
+                'z_src' shape=(n_lenses)
         """
 
         # no processing needed (np.squeeze ensures any dimensions of size 1
@@ -157,7 +168,8 @@ class TDCLikelihood():
                                     np.matmul(data_vector_dict['td_likelihood_prec'], x_minus_mu))
 
         # reduce to two dimensions: (n_lenses,n_fpd_samples)
-        exponent = np.squeeze(exponent)
+        # edge case: what if only one lens...
+        exponent = np.squeeze(exponent,axis=-1)
 
         # log-likelihood
         return data_vector_dict['td_likelihood_prefactors'] + exponent
@@ -521,6 +533,17 @@ class TDCKinLikelihood(TDCLikelihood):
                 return the prior then...)
             beta_ani_samples (): None if beta_ani not in population model
                 (n_lenses,n_fpd_samples)
+
+        Note:
+            likelihood evaluation requires an accompanying data_vector_dict 
+            with key/value pairs:
+                'td_measured' (n_lenses,n_td)
+                'td_likelihood_prec' (n_lenses,n_td,n_td)
+                'td_likelihood_prefactors' (n_lenses)
+                'fpd_samples' (n_lenses,n_imp_samples,n_td)
+                'lens_param_samples (n_lenses,n_imp_samples,n_lens_params)
+                'z_lens' (n_lenses)
+                'z_src' (n_lenses)
         """
 
         super().__init__(fpd_sample_shape, cosmo_model ,use_gamma_info,
