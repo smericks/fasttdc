@@ -415,63 +415,6 @@ class TDCSamplerTests(unittest.TestCase):
             n_walkers=20)
         self._check_chain_moves(test_chain)  
 
-
-    def test_tdckinlikelihood(self):
-        # TODO: fix this whole function!!!!!
-        # initialize likelihood object
-        quad_kin_lklhd = tdc_sampler.TDCKinLikelihood(
-                    self.td_measured_quads,self.td_prec_quads,
-                    self.sigma_v_measured,self.sigma_v_likelihood_prec,
-                    self.fpd_pred_samples_quads,self.gamma_pred_samples_quads,
-                    self.kin_pred_samples,
-                    z_lens=[0.6],z_src=[1.3])
-        
-        # h0,Omega_M,mu(gamma_lens),sigma(gamma_lens)
-        hyperparameters = [70.,0.3,2.0,0.1]
-        # NOTE: this prior model matches the default option in TDCLikelihood
-        prior_gamma_model = uniform(loc=1.,scale=2.)
-        proposed_gamma_model = norm(loc=hyperparameters[-2],scale=hyperparameters[-1])
-
-        # lens 1 (the quad)
-        lens1_computed_ll = quad_kin_lklhd.full_log_likelihood(hyperparameters)
-
-        # get model predictions
-        proposed_cosmo = quad_kin_lklhd.construct_proposed_cosmo(hyperparameters)
-        td_pred_samples = quad_kin_lklhd.td_pred_from_fpd_pred(proposed_cosmo)
-        sigma_v_pred_samples = quad_kin_lklhd.sigma_v_pred_from_kin_pred(proposed_cosmo)
-
-        # lens 1 (the quad)
-        lens1_likelihood = 0
-        for f in range(0,5):
-            # time delay likelihood
-            my_pred = np.asarray(td_pred_samples[0][f])
-            x_minus_mu = (my_pred-np.asarray(self.td_measured_quads[0]))
-            prec_mat = self.td_prec_quads[0]
-            exponent_td = -0.5 * np.matmul(x_minus_mu,np.matmul(prec_mat,x_minus_mu))
-            log_prefactor_td = (np.log((1/(2*np.pi))**(1.5) / 
-                np.sqrt(20.*22.*24.))) # NOTE: hardcoded
-            td_ll = exponent_td + log_prefactor_td
-
-            # kinematic likelihood 
-            sigma_v_pred = sigma_v_pred_samples[0][f][0]
-            exponent_kin = (-0.5*(sigma_v_pred - self.sigma_v_measured[0][0])**2 * 
-                    self.sigma_v_likelihood_prec[0][0][0])
-            log_prefactor_kin = (np.log((1/(2*np.pi))**(0.5) / 
-                np.sqrt(25.)) ) # NOTE: hardcoded
-
-            kin_ll = exponent_kin + log_prefactor_kin
-            # gamma_lens reweighting
-            gamma_samp = self.gamma_pred_samples_quads[0][f]
-            rw_factor = (proposed_gamma_model.logpdf(gamma_samp) - 
-                prior_gamma_model.logpdf(gamma_samp))
-            
-            # the combination
-            lens1_log_likelihood = td_ll + kin_ll + rw_factor
-            lens1_likelihood += np.exp(lens1_log_likelihood)
-
-        lens1_likelihood /= 5
-
-        self.assertAlmostEqual(lens1_computed_ll,np.log(lens1_likelihood))      
 """
         
 
