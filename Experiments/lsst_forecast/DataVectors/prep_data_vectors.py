@@ -174,8 +174,10 @@ def create_static_data_vectors(
         (dict) data_vector_dict = 
             {   'td_measured':,
                 'td_likelihood_prec':,
+                'td_likelihood_prefactors':,
                 'sigma_v_measured':,
                 'sigma_v_likelihood_prec':,
+                'sigma_v_likelihood_prefactors':,
                 'fpd_samples':,
                 'gamma_pred_samples':,
                 'beta_ani_samples':,
@@ -183,6 +185,8 @@ def create_static_data_vectors(
                 'kappa_ext_samples':,
                 'z_lens':,
                 'z_src':,
+                'log_prob_lens_param_samps_nu_int'
+                'log_prob_beta_ani_samps_nu_int'
             }
         
     """

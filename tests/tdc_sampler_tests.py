@@ -74,38 +74,40 @@ class TDCSamplerTests(unittest.TestCase):
             (1/(2*np.pi)**(num_td/2)) / np.sqrt(np.linalg.det(
                 np.linalg.inv(self.data_vector_dict_quads['td_likelihood_prec']))) )
 
-        # kinematics
-        self.sigma_v_measured = np.asarray([
-            [130.]
-        ])
-
-        self.sigma_v_likelihood_prec = np.asarray([
-            [[1/25.]]
-        ])
-
-        self.kin_pred_samples = np.asarray([
+        # add in aperture kinematics for the dbl 
+        self.data_vector_dict_dbls['kin_pred_samples'] = np.asarray([
             [[120.],[140.],[150.],[100.],[110.]]
         ])
-
-        # ifu kinematics
-        self.ifu_sigma_v_measured = np.asarray([
-            [150., 155., 160.]
+        self.data_vector_dict_dbls['sigma_v_measured'] =  np.asarray([
+            [130.]
         ])
-
-        self.ifu_sigma_v_likelihood_prec = np.asarray([
-            [[1/25., 0., 0.],
-             [0., 1/25., 0.],
-             [0., 0., 1/25.]
-            ]
+        self.data_vector_dict_dbls['sigma_v_likelihood_prec'] = np.asarray([
+            [[1/25.]]
         ])
+        self.data_vector_dict_dbls['sigma_v_likelihood_prefactors'] = []
 
-        self.ifu_sigma_v_pred_samples = np.asarray([
+        # add in ifu kinematics for the quad
+        self.data_vector_dict_quads['kin_pred_samples'] = np.asarray([
             [[160., 160., 160.],
              [150., 140., 170.],
              [151., 156., 161.],
              [149., 154., 159.],
              [158., 155., 170.]]
         ])
+        self.data_vector_dict_quads['sigma_v_measured'] = np.asarray([
+            [150., 155., 160.]
+        ])
+        self.data_vector_dict_quads['sigma_v_likelihood_prec'] = np.asarray([
+            [[1/25., 0., 0.],
+             [0., 1/25., 0.],
+             [0., 0., 1/25.]
+            ]
+        ])
+        num_kin_bins = 3
+        self.data_vector_dict_quads['sigma_v_likelihood_prefactors'] = np.log( 
+            (1/(2*np.pi)**(num_kin_bins/2)) / np.sqrt(np.linalg.det(
+                np.linalg.inv(self.data_vector_dict_quads['td_likelihood_prec']))) )
+
 
         self.beta_ani_samples = np.asarray([
             [0.1,-0.1,0.05,-0.05,0.]
@@ -239,6 +241,69 @@ class TDCSamplerTests(unittest.TestCase):
         # w0waCDM case
         likelihood_test_case(dbl_lklhd_w0wa,quad_lklhd_w0wa,hyperparameters=[70,0.3,-1.,0.,2.0,0.2])
 
+    def test_tdckinlikelihood(self):
+
+        # initialize likelihood object
+        quad_kin_lklhd = tdc_sampler.TDCKinLikelihood(
+            fpd_sample_shape=np.shape(self.data_vector_dict_quads['fpd_samples']),
+            kin_pred_samples_shape=np.shape(self.data_vector_dict_quads['kin_pred_samples']),
+            cosmo_model='LCDM',use_gamma_info=True)
+        
+        # h0,Omega_M,mu(gamma_lens),sigma(gamma_lens)
+        hyperparameters = [70.,0.3,2.0,0.1]
+        proposed_cosmo = quad_kin_lklhd.construct_proposed_cosmo(hyperparameters)
+        proposed_gamma_model = norm(loc=hyperparameters[-2],scale=hyperparameters[-1])
+
+        # TODO from here down
+
+        # get model predictions
+        td_pred_samples = quad_kin_lklhd.td_pred_from_fpd_pred(proposed_cosmo,
+            data_vector_dict=self.data_vector_dict_quads)
+        sigma_v_pred_samples = quad_kin_lklhd.sigma_v_pred_from_kin_pred(
+            proposed_cosmo,
+            data_vector_dict=self.data_vector_dict_quads)
+
+        # lens 1 (the quad)
+        quad_likelihood = 0
+        for f in range(0,5):
+            # time-delay likelihood
+            my_pred = np.asarray(td_pred_samples[0][f])
+            x_minus_mu = (my_pred -
+                self.data_vector_dict_quads['td_measured'][0])
+            prec_mat = self.data_vector_dict_quads['td_likelihood_prec'][0]
+            exponent = -0.5 * np.matmul(x_minus_mu,np.matmul(prec_mat,x_minus_mu))
+            log_prefactor = (np.log((1/(2*np.pi))**(1.5) / 
+                np.sqrt(20.*22.*24.))) # NOTE: hardcoded
+            td_ll = exponent + log_prefactor
+
+            # kinematic likelihood 
+            sigma_v_pred = np.asarray(sigma_v_pred_samples[0][f])
+            x_minus_mu_kin = (sigma_v_pred - 
+                self.data_vector_dict_quads['sigma_v_measured'][0])
+            prec_mat_kin = self.data_vector_dict_quads['sigma_v_likelihood_prec'][0]
+            exponent_kin = -0.5 * np.matmul(x_minus_mu_kin,np.matmul(prec_mat_kin,x_minus_mu_kin))
+            log_prefactor_kin = (np.log((1/(2*np.pi))**(1.5) / 
+                np.sqrt(20.*22.*24.))) # NOTE: hardcoded for 3 kin bins
+            kin_ll = exponent_kin + log_prefactor_kin
+
+            # gamma_lens reweighting
+            gamma_samp = self.data_vector_dict_quads['lens_param_samples'][0,f,3]
+            # default assumption = uninformative interim prior 
+            #   (rw factor just comes from proposed pop model)
+            rw_factor = proposed_gamma_model.logpdf(gamma_samp)
+
+            # combine all three components
+            quad_log_likelihood = td_ll + kin_ll + rw_factor
+            quad_likelihood += np.exp(quad_log_likelihood)
+
+        # avg. over 5 importance samples
+        quad_likelihood /= 5
+
+        # compare to log-likelihood from function
+        quad_computed_ll = quad_kin_lklhd.full_log_likelihood(hyperparameters,
+            data_vector_dict=self.data_vector_dict_quads)
+        self.assertAlmostEqual(quad_computed_ll,np.log(quad_likelihood))  
+
     def test_ddt_posteriors_from_fpd_td(self):
 
         # set up something where we know the ground truth
@@ -275,6 +340,7 @@ class TDCSamplerTests(unittest.TestCase):
         ddt_chain_sigma = np.std(ddt_chain_stacked,ddof=1)
         print('Predicted ddt: ', ddt_chain_mean, ' +/- ', ddt_chain_sigma)
         print("True ddt: ", Ddt_truth)
+ 
 
 """
         

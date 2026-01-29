@@ -59,6 +59,8 @@ class TDCLikelihood():
                 'lens_param_samples shape=(n_lenses,n_imp_samples,n_lens_params)
                 'z_lens' shape=(n_lenses)
                 'z_src' shape=(n_lenses)
+            OPTIONAL
+                'kappa_ext_samples' shape=(n_lenses,n_imp_samples)
         """
 
         if cosmo_model not in ['LCDM', 'LCDM_lambda_int',
@@ -487,13 +489,21 @@ class TDCKinLikelihood(TDCLikelihood):
         Note:
             likelihood evaluation requires an accompanying data_vector_dict 
             with key/value pairs:
-                'td_measured' (n_lenses,n_td)
-                'td_likelihood_prec' (n_lenses,n_td,n_td)
-                'td_likelihood_prefactors' (n_lenses)
-                'fpd_samples' (n_lenses,n_imp_samples,n_td)
-                'lens_param_samples (n_lenses,n_imp_samples,n_lens_params)
-                'z_lens' (n_lenses)
-                'z_src' (n_lenses)
+                'td_measured' shape=(n_lenses,n_td)
+                'td_likelihood_prec' shape=(n_lenses,n_td,n_td)
+                'td_likelihood_prefactors' shape=(n_lenses)
+                'fpd_samples' shape=(n_lenses,n_imp_samples,n_td)
+                'sigma_v_measured' shape=(n_lenses,n_kin_bins)
+                'sigma_v_likelihood_prec' shape=(n_lenses,n_kin_bins,n_kin_bins)
+                'sigma_v_liklelihood_prefactors' shape=(n_lenses)
+                'kin_pred_samples' shape=(n_lenses,n_imp_samples,n_kin_bins)
+                'lens_param_samples shape=(n_lenses,n_imp_samples,n_lens_params)
+                'z_lens' shape=(n_lenses)
+                'z_src' shape=(n_lenses)
+            OPTIONAL
+                'beta_ani_samples' shape=(n_lenses,n_imp_samples)
+                'log_prob_beta_ani_samps_nu_int' shape=(n_lenses,n_imp_samples)
+                'kappa_ext_samples' shape=(n_lenses,n_imp_samples)
         """
 
         super().__init__(fpd_sample_shape, cosmo_model ,use_gamma_info,
