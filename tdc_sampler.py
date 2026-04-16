@@ -59,6 +59,8 @@ class TDCLikelihood():
                 'lens_param_samples shape=(n_lenses,n_imp_samples,n_lens_params)
                 'z_lens' shape=(n_lenses)
                 'z_src' shape=(n_lenses)
+            Optional: 
+                'log_prob_lens_param_samps_nu_int' shape=(n_lenses,n_imp_samples)
         """
 
         if cosmo_model not in ['LCDM', 'LCDM_lambda_int',
