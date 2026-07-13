@@ -11,6 +11,8 @@ from astropy.cosmology import w0waCDM
 from scipy.stats import norm, truncnorm, uniform, multivariate_normal
 import Utils.tdc_utils as tdc_utils
 import math
+from priors import *
+from completo_tdc_extensions import *
 
 USE_JAX = False
 
@@ -19,6 +21,7 @@ if USE_JAX:
 """
 cosmo_models available: 
     'LCDM': [H0,OmegaM,mu(gamma_lens),sigma(gamma_lens)]
+    'LCDM_completo_cPDF': [H0,OmegaM,mu(params),chol_elements(params)]
     'w0waCDM': [H0,OmegaM,w0,wa,mu(gamma_lens),sigma(gamma_lens)]
     'LCDM_lambda_int': [H0,OmegaM,mu(lambda_int),sigma(lambda_int),
         mu(gamma_lens),sigma(gamma_lens)]
@@ -64,11 +67,13 @@ class TDCLikelihood():
         """
 
         if cosmo_model not in ['LCDM', 'LCDM_lambda_int',
-                               'LCDM_lambda_int_beta_ani', 'w0waCDM', 
+                               'LCDM_lambda_int_beta_ani', 
+                               'LCDM_completo_cPDF',
+                               'w0waCDM', 
                                'w0waCDM_lambda_int_beta_ani',
                                'w0waCDM_fullcPDF','w0waCDM_fullcPDF_noKIN']:
             raise ValueError("choose from available cosmo_models: " +
-                             "LCDM, LCDM_lambda_int, LCDM_lambda_int_beta_ani, w0waCDM, " +
+                             "LCDM, LCDM_lambda_int, LCDM_lambda_int_beta_ani, LCDM_completo_cPDF, w0waCDM, " +
                              "w0waCDM_lambda_int_beta_ani, w0waCDM_fullcPDF")
         self.cosmo_model = cosmo_model
         self.use_gamma_info = use_gamma_info
@@ -192,6 +197,7 @@ class TDCLikelihood():
         omega_c_input = hyperparameters[1] - 0.05  # CDM fraction
         omega_de_input = 1. - omega_m_input
         if self.cosmo_model in ['LCDM', 'LCDM_lambda_int',
+                                'LCDM_completo_cPDF',
                                 'LCDM_lambda_int_beta_ani']:
             w0_input = -1.
             wa_input = 0.
@@ -682,415 +688,106 @@ class TDCKinLikelihood(TDCLikelihood):
         return log_likelihood
     
 
+# overwrite TDCLikelihood (changing the compute_rw_factor() function)
+class TDCLikelihoodCompleto(TDCLikelihood):
+    """
+        Keep track of quantities that remain constant throughout the inference
+
+        Args:
+            fpd_sample_shape ()
+            cosmo_model (string): 'LCDM' or 'w0waCDM'
+            use_gamma_info (bool): If False, removes reweighting from likelihood
+                evaluation (any population level gamma params should just
+                return the prior then...)
+
+        Note:
+            likelihood evaluation requires an accompanying data_vector_dict 
+            with key/value pairs:
+                'td_measured' shape=(n_lenses,n_td)
+                'td_likelihood_prec' shape=(n_lenses,n_td,n_td)
+                'td_likelihood_prefactors' shape=(n_lenses)
+                'fpd_samples' shape=(n_lenses,n_imp_samples,n_td)
+                'z_lens' shape=(n_lenses)
+                'z_src' shape=(n_lenses)
+            NEW REQUIRED PARAMS FOR COMPLETO SETTING: 
+                'cPDF_param_samples': shape=(n_lenses,n_imp_samples,n_cPDF_params)
+                    all parameters are normalized s.t. mu=0., std.dev.=1.
+                'log_prob_cPDF_params_nu_int': shape=(n_lenses,n_imp_samples)
+                    log_prob of each lens_param samp evaluated against the interim prior (nu_int)
+    """
+
+    def compute_rw_factor(self,hyperparameters,data_vector_dict=None, 
+                global_data_vector_idx=None):
+        """ Re-weighting for pop model (nu) vs. interim prior (nu_int)
+        Args: 
+            hyperparameters ():
+            data_vector_dict ():
+            global_data_vector_idx ():
+
+        Returns:
+            rw_factor ():
+        """
+
+        # check whether using global data vectors or passing directly...
+        if global_data_vector_idx is not None:
+            # make sure we're not trying to do two things at once
+            if data_vector_dict is not None:
+                raise ValueError('pass data vector OR index into global data vector, not both')
+            # retrieve globally stored data vectors
+            data_vector_dict = data_vector_global[global_data_vector_idx]
+
+        if self.cosmo_model == 'LCDM_completo_cPDF':
+            num_cp = 2 # number of cosmological params at front of DV
+        else:
+            raise ValueError('cosmology not compatible with completo likelihood (yet!)')
+
+        # here comes the lens params cPDF
+        num_h = len(hyperparameters[num_cp:]) # num_h = N + N(N+1)/2 (num. hyperparameters)
+        # solv quad. eqn. to determine # of lens params (0 = n^2 + 3n -2(num_h))
+        num_lp = int((-3 + np.sqrt(9+8*num_h))/2) # we only need the positive solution...
+
+        means = hyperparameters[num_cp:(num_lp+num_cp)]
+        chol_elements = hyperparameters[(num_lp+num_cp):]
+
+        # chol_elements -> cov. matrix
+        L = np.zeros((num_lp, num_lp))
+        L[np.tril_indices(num_lp)] = chol_elements
+        # Reconstruct covariance matrix: Cov = L @ L.T
+        cov_matrix = L @ L.T
+
+        # retrieve params to evaluate on
+        param_samps = data_vector_dict['cPDF_param_samples']
+        n_lenses, n_fpd_samps, _ = param_samps.shape
+        param_samps = param_samps.reshape(-1,num_lp) # flatten first two dims
+        # eval at proposed hypermodel
+        eval_at_proposed_nu = multivariate_normal.logpdf(param_samps,mean=means,
+            cov=cov_matrix)
+        eval_at_proposed_nu = eval_at_proposed_nu.reshape(n_lenses, n_fpd_samps) # unravel dims
+
+        # compute the rw factor by comparing to interim prior 
+        if 'log_prob_cPDF_params_nu_int' in data_vector_dict.keys():
+            # informative interim prior specified 
+            rw_factor = (eval_at_proposed_nu - 
+                data_vector_dict['log_prob_cPDF_params_nu_int'])
+        else:
+            # uniform / uninformative interim prior
+            rw_factor = eval_at_proposed_nu
+            
+        #print('nan in rw_factor?: ', np.sum(np.isnan(rw_factor)))
+        return rw_factor
+
+
 #########################
 # Sampling Implementation
 #########################
 
-def LCDM_log_prior(hyperparameters):
-    """
-    Args:
-        hyperparameters ([H0,omega_M,mu_gamma,sigma_gamma])
-    """
-
-    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
-        return -np.inf
-    if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
-        return -np.inf
-    elif hyperparameters[2] < 1.5 or hyperparameters[2] > 2.5: #mu(gamma_lens)
-        return -np.inf
-    elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.2: #sigma(gamma_lens)
-        return -np.inf
-    
-    return 0
-
-def LCDM_lambda_int_log_prior(hyperparameters):
-    """
-    Args:
-        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
-            mu_gamma,sigma_gamma])
-    """
-
-    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
-        return -np.inf
-    if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
-        return -np.inf
-    elif hyperparameters[2] < 0.5 or hyperparameters[2] > 1.5: #mu(lambda_int)
-        return -np.inf
-    elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.5: #sigma(lambda_int)
-        return -np.inf
-    elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5: #mu(gamma_lens)
-        return -np.inf
-    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(gamma_lens)
-        return -np.inf
-    
-    return 0
-
-def LCDM_lambda_int_beta_ani_log_prior(hyperparameters):
-    """
-    Args:
-        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
-            mu_gamma,sigma_gamma])
-    """
-
-    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
-        return -np.inf
-    if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
-        return -np.inf
-    elif hyperparameters[2] < 0.5 or hyperparameters[2] > 1.5: #mu(lambda_int)
-        return -np.inf
-    elif hyperparameters[3] < 0.001 or hyperparameters[3] > 0.5: #sigma(lambda_int)
-        return -np.inf
-    elif hyperparameters[4] < -0.5 or hyperparameters[4] > 0.5: #mu(beta_ani)
-        return -np.inf
-    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(beta_ani)
-        return -np.inf
-    elif hyperparameters[6] < 1.5 or hyperparameters[6] > 2.5: #mu(gamma_lens)
-        return -np.inf
-    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.2: #sigma(gamma_lens)
-        return -np.inf
-    
-    return 0
-
-def w0waCDM_log_prior(hyperparameters):
-    """
-    Args:
-        hyperparameters ([H0,Omega_M,w0,wa,mu_gamma,sigma_gamma])
-    """
-
-    # h0 [0,150]
-    if hyperparameters[0] < 0 or hyperparameters[0] > 150: 
-        return -np.inf
-    # Omega_M [0.05,0.5]
-    if hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: 
-        return -np.inf
-    #w0 [-2,0]
-    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
-        return -np.inf
-    #wa [-2,2]
-    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
-        return -np.inf
-    #mu(gamma)
-    elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5:
-        return -np.inf
-    #sigma(gamma)
-    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2:
-        return -np.inf
-    
-    return 0
-
-def w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
-    """
-    Args:
-        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
-            mu_gamma,sigma_gamma])
-    """
-
-    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
-        return -np.inf
-    elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
-        return -np.inf
-    #w0 [-2,0]
-    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
-        return -np.inf
-    #wa [-2,2]
-    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
-        return -np.inf
-    elif hyperparameters[4] < 0.5 or hyperparameters[4] > 1.5: #mu(lambda_int)
-        return -np.inf
-    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.5: #sigma(lambda_int)
-        return -np.inf
-    elif hyperparameters[6] < -0.5 or hyperparameters[6] > 0.5: #mu(beta_ani)
-        return -np.inf
-    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.2: #sigma(beta_ani)
-        return -np.inf
-    elif hyperparameters[8] < 1.5 or hyperparameters[8] > 2.5: #mu(gamma_lens)
-        return -np.inf
-    elif hyperparameters[9] < 0.001 or hyperparameters[9] > 0.2: #sigma(gamma_lens)
-        return -np.inf
-    
-    return 0
-
-def tdcosmo25_lambda_int_beta_ani_log_prior(hyperparameters):
-    """
-    Args:
-        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
-            mu_gamma,sigma_gamma])
-    """
-
-    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
-        return -np.inf
-    elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
-        return -np.inf
-    #w0 [-1.5,0.5]
-    elif hyperparameters[2] < -1.5 or hyperparameters[2] > 0.5:
-        return -np.inf
-    #wa [-10,10]
-    elif hyperparameters[3] < -10 or hyperparameters[3] > 10:
-        return -np.inf
-    elif hyperparameters[4] < 0.5 or hyperparameters[4] > 1.5: #mu(lambda_int)
-        return -np.inf
-    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.5: #sigma(lambda_int)
-        return -np.inf
-    elif hyperparameters[6] < -0.5 or hyperparameters[6] > 0.5: #mu(beta_ani)
-        return -np.inf
-    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.2: #sigma(beta_ani)
-        return -np.inf
-    elif hyperparameters[8] < 1.5 or hyperparameters[8] > 2.5: #mu(gamma_lens)
-        return -np.inf
-    elif hyperparameters[9] < 0.001 or hyperparameters[9] > 0.2: #sigma(gamma_lens)
-        return -np.inf
-    
-    return 0
-
-def OmegaM_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
-    """Include approximation of Pantheon+ Prior used in TDCOSMO 2025 (https://arxiv.org/pdf/2506.03023)
-        Note page 17: "Pantheon+ effectively provided a prior on Ωm (i.e., Ωm = 0.334 ± 0.018)"
-    """
-
-    # returns 0 or -np.inf
-    within_bounds = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
-
-    if within_bounds == 0:   
-        # note we center our ground truth at 0.3     
-        return norm.logpdf(hyperparameters[1],loc=0.3,scale=0.018)
-
-    else:
-        return within_bounds
-
-# TODO: finish incorporating this option for informative OmegaM + LCDM
-def OmegaM_LCDM_lambda_int_beta_ani_log_prior(hyperparameters):
-    """Include approximation of Pantheon+ Prior used in TDCOSMO 2025 (https://arxiv.org/pdf/2506.03023)
-        Note page 17: "Pantheon+ effectively provided a prior on Ωm (i.e., Ωm = 0.334 ± 0.018)"
-    """
-
-    # returns 0 or -np.inf
-    within_bounds = LCDM_lambda_int_beta_ani_log_prior(hyperparameters)
-
-    if within_bounds == 0:   
-        # note we center our ground truth at 0.3     
-        return norm.logpdf(hyperparameters[1],loc=0.3,scale=0.018)
-
-    else:
-        return within_bounds
-
-def InformedPop_InformedOmegaM_LCDM_lambda_int_beta_ani_log_prior(hyperparameters):
-    """Informative prior on BOTH OmegaM and populations of lambda_int, beta_ani
-        assuming some external sample is constraining lambda_int, beta_ani properties 
-    """
-
-    # returns 0 or -np.inf
-    within_bounds = LCDM_lambda_int_beta_ani_log_prior(hyperparameters)
-
-    if within_bounds == 0:   
-        # note we center our ground truth at 0.3     
-        om_prior = norm.logpdf(hyperparameters[1],loc=0.3,scale=0.018)
-        # NOTE: modified to extreme amt. of precision
-        lens_pop_prior = multivariate_normal.logpdf(hyperparameters[2:6],
-            mean=[1.,0.05,0.,0.05],
-            cov=np.diag(np.asarray([0.01,0.01,0.01,0.01])**2))
-        #lint_mu_prior = norm.logpdf(hyperparameters[2],loc=1.,scale=0.05)
-        #bani_prior = norm.logpdf(hyperparameters[4],loc=0.,scale=0.05)
-        
-        return (om_prior+lens_pop_prior)
-
-    else:
-        return within_bounds
-
-
-def InformedPop_InformedOmegaM_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
-    """Informative prior on BOTH OmegaM and populations of lambda_int, beta_ani
-        assuming some external sample is constraining lambda_int, beta_ani properties 
-    """
-
-    # returns 0 or -np.inf
-    within_bounds = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
-
-    if within_bounds == 0:   
-        # note we center our ground truth at 0.3     
-        om_prior = norm.logpdf(hyperparameters[1],loc=0.3,scale=0.018)
-        # NOTE: modified to extreme amt. of precision
-        lens_pop_prior = multivariate_normal.logpdf(hyperparameters[4:8],
-            mean=[1.,0.05,0.,0.05],
-            cov=np.diag(np.asarray([0.01,0.01,0.01,0.01])**2))
-        #lint_prior = norm.logpdf(hyperparameters[4],loc=1.,scale=0.05)
-        #bani_prior = norm.logpdf(hyperparameters[6],loc=0.,scale=0.05)
-
-        return (om_prior+lens_pop_prior)
-
-    else:
-        return within_bounds
-        
-
-def INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
-    """
-    Used for redshift configuration test. Only evaluates on params 4-8 
-        (mu_lambda_int,sigma_lambda_int,mu_beta_ani,sigma_beta_ani). 
-    An informative prior on these params to simulate being within a larger
-        population inference...
-    """
-
-    # returns 0 or -np.inf
-    within_bounds = w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
-
-    if within_bounds == 0:
-        # this cov matrix is hardcoded, taken from a gold-only chain
-        # we only evaluate on the last 4 params, so this is only a prior
-        # on lambda_int and beta_ani...
-        HARCODED_COV = np.asarray([[ 6.12374896e+00, -2.15141853e-02, -5.71087181e-01,
-            6.32316635e-01,  6.94284277e-03,  2.95354324e-06,
-            -1.26510967e-02,  1.61769785e-03],
-        [-2.15141853e-02,  8.55982425e-03, -1.62265553e-02,
-            -5.83908439e-02, -1.32491066e-03, -2.36135703e-05,
-            -8.11721417e-05, -2.57776450e-04],
-        [-5.71087181e-01, -1.62265553e-02,  1.19990785e-01,
-            -3.55331429e-02,  4.35775938e-03,  1.29247499e-04,
-            9.69690762e-04,  2.02107237e-04],
-        [ 6.32316635e-01, -5.83908439e-02, -3.55331429e-02,
-            1.29002622e+00,  3.60024828e-03, -4.88360131e-04,
-            7.42754178e-04,  3.08261219e-03],
-        [ 6.94284277e-03, -1.32491066e-03,  4.35775938e-03,
-            3.60024828e-03,  5.62846938e-04,  9.40058479e-06,
-            -7.31255777e-05,  2.98668773e-05],
-        [ 2.95354324e-06, -2.36135703e-05,  1.29247499e-04,
-            -4.88360131e-04,  9.40058479e-06,  1.13811882e-04,
-            9.53635163e-06,  8.34327893e-06],
-        [-1.26510967e-02, -8.11721417e-05,  9.69690762e-04,
-            7.42754178e-04, -7.31255777e-05,  9.53635163e-06,
-            6.78136734e-04,  4.25489473e-05],
-        [ 1.61769785e-03, -2.57776450e-04,  2.02107237e-04,
-            3.08261219e-03,  2.98668773e-05,  8.34327893e-06,
-            4.25489473e-05,  7.58572080e-04]])
-            
-        HARDCODED_MEAN = np.asarray([ 70.,  0.3, -1.,  0.,
-            1.,  0.1,  0.,  0.1])
-        
-        return multivariate_normal.logpdf(hyperparameters[4:8],
-            mean=HARDCODED_MEAN[4:],cov=HARCODED_COV[4:,4:])
-
-    else:
-        return within_bounds
-        
-
-def OmegaM_INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters):
-    
-    log_prob = INFORMATIVE_w0waCDM_lambda_int_beta_ani_log_prior(hyperparameters)
-
-    # multiply in p(Omega_M)
-    if np.isfinite(log_prob):
-        log_prob += norm.logpdf(hyperparameters[1],loc=0.3,scale=0.018)
-
-    return log_prob
-
-
-def w0waCDM_fullcPDF_log_prior(hyperparameters):
-    """
-    Args:
-        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
-            mu_gamma,sigma_gamma])
-    """
-
-    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
-        return -np.inf
-    elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
-        return -np.inf
-    #w0 [-2,0]
-    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
-        return -np.inf
-    #wa [-2,2]
-    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
-        return -np.inf
-    elif hyperparameters[4] < 0.5 or hyperparameters[4] > 1.5: #mu(lambda_int)
-        return -np.inf
-    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.5: #sigma(lambda_int)
-        return -np.inf
-    elif hyperparameters[6] < -0.5 or hyperparameters[6] > 0.5: #mu(beta_ani)
-        return -np.inf
-    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.2: #sigma(beta_ani)
-        return -np.inf
-    # LENS PARAMS
-    elif hyperparameters[8] < 1.5 or hyperparameters[8] > 2.5: #mu(gamma_lens)
-        return -np.inf
-    elif hyperparameters[9] < 0.001 or hyperparameters[9] > 0.2: #sigma(gamma_lens)
-        return -np.inf
-    elif hyperparameters[10] < 0.2 or hyperparameters[10] > 2.0: #mu(theta_E)
-        return -np.inf
-    elif hyperparameters[11] < 0.001 or hyperparameters[11] > 0.7: #sigma(theta_E)
-        return -np.inf
-    elif hyperparameters[12] < 0.001 or hyperparameters[12] > 0.1: #sigma(gamma1/2)
-        return -np.inf
-    elif hyperparameters[13] < 0.001 or hyperparameters[13] > 0.2: #sigma(e1/2)
-        return -np.inf
-    
-    return 0
-
-def w0waCDM_fullcPDF_noKIN_log_prior(hyperparameters):
-    """
-    Args:
-        hyperparameters ([H0,omega_M,mu_lambda_int,sigma_lambda_int,
-            mu_gamma,sigma_gamma])
-    """
-
-    if hyperparameters[0] < 0 or hyperparameters[0] > 150: #h0
-        return -np.inf
-    elif hyperparameters[1] < 0.05 or hyperparameters[1] > 0.5: #omega_M 
-        return -np.inf
-    #w0 [-2,0]
-    elif hyperparameters[2] < -2 or hyperparameters[2] > 0:
-        return -np.inf
-    #wa [-2,2]
-    elif hyperparameters[3] < -2 or hyperparameters[3] > 2:
-        return -np.inf
-    # LENS PARAMS
-    elif hyperparameters[4] < 1.5 or hyperparameters[4] > 2.5: #mu(gamma_lens)
-        return -np.inf
-    elif hyperparameters[5] < 0.001 or hyperparameters[5] > 0.2: #sigma(gamma_lens)
-        return -np.inf
-    elif hyperparameters[6] < 0.2 or hyperparameters[6] > 2.0: #mu(theta_E)
-        return -np.inf
-    elif hyperparameters[7] < 0.001 or hyperparameters[7] > 0.7: #sigma(theta_E)
-        return -np.inf
-    elif hyperparameters[8] < 0.001 or hyperparameters[8] > 0.1: #sigma(gamma1/2)
-        return -np.inf
-    elif hyperparameters[9] < 0.001 or hyperparameters[9] > 0.2: #sigma(e1/2)
-        return -np.inf
-    
-    return 0
-
-
-def dynesty_prior_transform(uniform_draw):
-    """Transforms the uniform random variable `u ~ Unif[0., 1.)`
-    to the parameter of interest `x ~ Unif[-10., 10.)`."""
-
-    x = uniform_draw
-    # H0
-    x[0] = 150*x[0] # scale to [0,150.]
-    # OmegaM
-    x[1] = 0.45*x[1] + 0.05 # scale to [0,.45], shift to [0.05,0.5]
-    # w0
-    x[2] = 2*x[2] - 2. # scale to [0,2.], shift to [-2,0.]
-    # wa
-    x[3] = 4*x[3] - 2. # scale to [0,4.], shift to [-2,2.]
-    #mu(lambda_int)
-    x[4] = x[4] + 0.5 # scale to [0,1.], shift to [0.5,1.5]
-    # sigma(lambda_int)
-    x[5] = 0.499*x[5] + 0.001 # scale to [0,0.499], shift to [0.001,0.5]
-    # mu(beta_ani)
-    x[6] = x[6] - 0.5 # scale to [0,1.], shift to [-0.5,0.5]
-    # sigma(beta_ani)
-    x[7] = 0.199*x[7] + 0.001 # scale to [0,0.199], shift to [0.001,0.2]
-    # mu(gamma_lens)
-    x[8] = x[8] + 1.5 # scale to [0,1.], shift to [1.5,2.5]
-    # sigma(gamma_lens)
-    x[9] = 0.199*x[9] + 0.001 # scale to [0,0.199], shift to [0.001,0.2]
-
-    return x
-
 def generate_initial_state(n_walkers,cosmo_model,use_tdcosmo25=False,
-        random_seed=None):
+        random_seed=None,num_cpdf_params=None):
     """
     Args:
         n_walkers (int): number of emcee walkers
         cosmo_model (string): 'LCDM' or 'w0waCDM'
+        num_cdpf_params (int): needed when using 'LCDM_completo_cPDF'
     """
 
     if random_seed is not None:
@@ -1099,8 +796,8 @@ def generate_initial_state(n_walkers,cosmo_model,use_tdcosmo25=False,
     if cosmo_model == 'LCDM':
         # order: [H0,Omega_M,mu_gamma,sigma_gamma]
         cur_state = np.empty((n_walkers,4))
-        cur_state[:,0] = uniform.rvs(loc=40,scale=60,size=n_walkers) #h0
-        cur_state[:,1] = uniform.rvs(loc=0.1,scale=0.35,size=n_walkers) #Omega_M
+        cur_state[:,0] = uniform.rvs(loc=65,scale=10,size=n_walkers) #h0
+        cur_state[:,1] = uniform.rvs(loc=0.25,scale=0.1,size=n_walkers) #Omega_M
         cur_state[:,2] = uniform.rvs(loc=1.5,scale=1.,size=n_walkers)
         cur_state[:,3] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
 
@@ -1132,6 +829,11 @@ def generate_initial_state(n_walkers,cosmo_model,use_tdcosmo25=False,
         cur_state[:,7] = uniform.rvs(loc=0.001,scale=0.199,size=n_walkers)
 
         return cur_state
+    
+    # needs # of lens cPDF params...
+    elif cosmo_model == 'LCDM_completo_cPDF':
+        return LCDM_completo_cPDF_log_prior_generate_initialstate(n_walkers,
+            cosmo_model,num_lp=num_cpdf_params,random_seed=None)
     
     elif cosmo_model == 'w0waCDM':
         # order: [H0,Omega_M,w0,wa,mu_gamma,sigma_gamma]
@@ -1242,6 +944,8 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
             lp = OmegaM_LCDM_lambda_int_beta_ani_log_prior(hyperparameters)
         else:
             lp = LCDM_lambda_int_beta_ani_log_prior(hyperparameters)
+    elif cosmo_model =='LCDM_completo_cPDF':
+        lp = LCDM_completo_cPDF_log_prior(hyperparameters)
     elif cosmo_model == 'w0waCDM':
         lp = w0waCDM_log_prior(hyperparameters)
     elif cosmo_model == 'w0waCDM_lambda_int_beta_ani':
@@ -1271,7 +975,8 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
 def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     n_walkers=20, use_mpi=False, use_multiprocess=False, backend_path=None, 
     reset_backend=True,sampler_type='emcee',use_informative=False,
-    use_inf_pop=False,use_OmegaM=False,use_tdcosmo25=False,init_seed=None):
+    use_inf_pop=False,use_OmegaM=False,use_tdcosmo25=False,init_seed=None,
+    num_cpdf_params=None):
     """
     Args:
         tdc_likelihood_list ([TDCLikelihood]): list of likelihood objects 
@@ -1287,6 +992,7 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
         use_informative, use_OmegaM: Boolean flags, control the use of informative priors...
         init_seed (int or None): if specified, seeds the random 
             initialization of walkers
+        num_cpdf_params (int or None): needed when using LCDM_completo_cPDF cosmo.
         
     Returns: 
         mcmc chain (emcee.EnsemblerSampler.chain or dynesty.NestedSampler.)
@@ -1322,7 +1028,8 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     # generate initial state
     cur_state = generate_initial_state(n_walkers,cosmo_model,
         use_tdcosmo25=use_tdcosmo25,
-        random_seed=init_seed)
+        random_seed=init_seed,
+        num_cpdf_params=num_cpdf_params)
 
     # emcee stuff here
     if not use_mpi:
