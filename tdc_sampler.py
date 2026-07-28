@@ -2,9 +2,6 @@ import time
 import sys
 from functools import partial
 import emcee
-import jax
-import jax.numpy as jnp
-import jax_cosmo
 import numpy as np
 from astropy.cosmology import w0waCDM
 from scipy.stats import norm, truncnorm, uniform, multivariate_normal
@@ -16,6 +13,9 @@ from completo_tdc_extensions import *
 USE_JAX = False
 
 if USE_JAX:
+    import jax
+    import jax.numpy as jnp
+    import jax_cosmo
     import tdc_jax_utils as jax_utils
 """
 cosmo_models available: 
