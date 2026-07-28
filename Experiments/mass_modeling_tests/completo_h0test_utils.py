@@ -10,9 +10,19 @@ from batched_fermatpot import eplshear_fp_samples
 import os
 import sys
 import time
-dirname = os.getcwd()
-sys.path.insert(0, os.path.join(dirname, '../../../sbi-stronglensing'))
-from src.training.data_loader import load_hdf5_labels
+import torch
+#dirname = os.getcwd()
+#sys.path.insert(0, os.path.join(dirname, '../../../sbi-stronglensing'))
+#from src.training.data_loader import load_hdf5_labels
+
+def load_hdf5_labels(file_path: str, parameter_labels: list) -> torch.Tensor:
+    """Loads parameter labels from a .h5 file and converts them to a tensor."""
+    with h5py.File(file_path, 'r') as f:
+        label_vals = []
+        for label in parameter_labels:
+            label_vals.append(f[label][:])
+        label_vals = np.column_stack(label_vals)
+    return torch.tensor(label_vals, dtype=torch.float32)
 
 
 def load_truth_vals_dict(completo_truth_h5, chosen_idxs, GROUNDTRUTH_COSMO): 
