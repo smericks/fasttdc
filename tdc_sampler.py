@@ -946,6 +946,9 @@ def log_posterior(hyperparameters, cosmo_model, tdc_likelihood_list,
             lp = LCDM_lambda_int_beta_ani_log_prior(hyperparameters)
     elif cosmo_model =='LCDM_completo_cPDF':
         lp = LCDM_completo_cPDF_log_prior(hyperparameters)
+        # TODO: switch to this format (can multiply the OmegaM prior in at this step w/out rewriting every function)
+        if use_OmegaM and np.isfinite(lp):
+            lp += norm.logpdf(hyperparameters[1],loc=0.3,scale=0.018)
     elif cosmo_model == 'w0waCDM':
         lp = w0waCDM_log_prior(hyperparameters)
     elif cosmo_model == 'w0waCDM_lambda_int_beta_ani':
