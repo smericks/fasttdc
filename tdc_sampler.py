@@ -2,7 +2,6 @@ import time
 import sys
 from functools import partial
 import emcee
-import dynesty
 import jax
 import jax.numpy as jnp
 import jax_cosmo
@@ -1006,11 +1005,6 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     for i in range(1,len(tdc_likelihood_list)):
         if tdc_likelihood_list[i].cosmo_model != cosmo_model:
             raise ValueError("")
-        
-
-    # dynesty only works with one model rn because of a hardcoded prior transform
-    if sampler_type == 'dynesty' and cosmo_model != 'w0waCDM_lambda_int_beta_ani':
-        raise ValueError('dynesty sampling not implemented for chosen cosmology')
 
     # make the variable global to speed up multiprocessing access during the sampling
     global data_vector_global
@@ -1019,9 +1013,6 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
     log_posterior_fn = partial(log_posterior, cosmo_model=cosmo_model,
         tdc_likelihood_list=tdc_likelihood_list,use_informative=use_informative,
         use_inf_pop=use_inf_pop,use_OmegaM=use_OmegaM,use_tdcosmo25=use_tdcosmo25)
-    # need this fnc for dynesty
-    log_likelihood_fn = partial(log_likelihood,
-        tdc_likelihood_list=tdc_likelihood_list)
     
     # TODO testing likelihood evaluation
     #hyperparameters = [70.,0.3,-1.,0.,1.,0.1,0.,0.1,2.,0.2]
@@ -1064,11 +1055,7 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
                     tok_mcmc = time.time()
                     print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
                 elif sampler_type == 'dynesty':
-                    sampler = dynesty.NestedSampler(loglikelihood=log_likelihood_fn,
-                        prior_transform=dynesty_prior_transform,
-                        ndim=10) # TODO: fix hard-coding of ndim for dynesty!!!!!
-                    sampler.run_nested(maxiter=num_emcee_samps,
-                        checkpoint_file=backend_path,checkpoint_every=60)
+                    raise ValueError("dynesty implementation removed")
 
         # No multiprocessing
         else:
@@ -1087,19 +1074,7 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
                 print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
 
             elif sampler_type == 'dynesty':
-                # TODO: test with dynamic nested sampler instead...
-                # bound='single', sample='unif',rstate=rstate
-                dsampler = dynesty.DynamicNestedSampler(loglikelihood=log_likelihood_fn,
-                    prior_transform=dynesty_prior_transform,
-                    ndim=10, bound='single', sample='unif')
-                #sampler = dynesty.NestedSampler(loglikelihood=log_likelihood_fn,
-                #    prior_transform=dynesty_prior_transform,
-                #    ndim=10) # TODO: fix hard-coding of ndim for dynesty!!!!!
-                print('checkpointing to: ', backend_path)
-                dsampler.run_nested(maxiter=num_emcee_samps,
-                    checkpoint_file=backend_path,checkpoint_every=10)
-                #sampler.run_nested(maxiter=num_emcee_samps,
-                #    checkpoint_file=backend_path,checkpoint_every=10)
+                raise ValueError("dynesty sampling removed")
 
     # MPI
     else: 
@@ -1135,14 +1110,7 @@ def fast_TDC(tdc_likelihood_list, data_vector_list, num_emcee_samps=1000,
                 print("Avg. Time per MCMC Step: %.3f seconds"%((tok_mcmc-tik_mcmc)/num_emcee_samps))
      
             elif sampler_type == 'dynesty':
-                sampler = dynesty.NestedSampler(loglikelihood=log_likelihood_fn,
-                    prior_transform=dynesty_prior_transform,
-                    ndim=10) # TODO: fix hard-coding of ndim for dynesty!!!!!
-                sampler.run_nested(maxiter=num_emcee_samps,
-                    checkpoint_file=backend_path,checkpoint_every=60)
-                
-                results = sampler.results
-                samples_equal = results.samples_equal()
+                raise ValueError("dynesty sampling removed")
 
     if backend_path is None:
         return sampler.get_chain()
